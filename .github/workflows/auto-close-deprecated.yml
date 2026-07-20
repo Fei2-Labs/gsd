@@ -1,0 +1,60 @@
+name: Auto-close (repository moved)
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  auto-close-issue:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUM: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh issue comment "$NUM" --repo "$REPO" --body-file - <<'BODY'
+          📦 **This repository has moved and is no longer maintained here.**
+
+          Development now happens at:
+          https://github.com/open-gsd/gsd-core
+
+          **Please file your issue on the active repo:**
+          https://github.com/open-gsd/gsd-core/issues/new/choose
+
+          This issue is being auto-closed and locked.
+          BODY
+          gh issue close "$NUM" --repo "$REPO" --reason "not planned"
+          gh api -X PUT "repos/$REPO/issues/$NUM/lock" -f lock_reason=resolved
+
+  auto-close-pr:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUM: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr comment "$NUM" --repo "$REPO" --body-file - <<'BODY'
+          📦 **This repository has moved and is no longer maintained here.**
+
+          Development now happens at:
+          https://github.com/open-gsd/gsd-core
+
+          **Please re-open your PR against the active repo:**
+          https://github.com/open-gsd/gsd-core
+
+          (You'll need to rebase your branch against `open-gsd/gsd-core` first.)
+
+          This PR is being auto-closed and locked.
+          BODY
+          gh pr close "$NUM" --repo "$REPO"
+          gh api -X PUT "repos/$REPO/issues/$NUM/lock" -f lock_reason=resolved
