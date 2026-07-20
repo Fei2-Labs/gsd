@@ -16,7 +16,7 @@ const { createTempDir, cleanup } = require('./helpers.cjs');
 
 // Lazy-loaded so tests can fail clearly when the export doesn't exist yet.
 function getPruneOrphanedWorktrees() {
-  const { pruneOrphanedWorktrees } = require('../get-shit-done/bin/lib/core.cjs');
+  const { pruneOrphanedWorktrees } = require('../gsd-core/bin/lib/worktree-safety.cjs');
   return pruneOrphanedWorktrees;
 }
 
@@ -181,6 +181,7 @@ describe('pruneOrphanedWorktrees', () => {
     assert.ok(listedWorktreePaths(repoDir).has(wantedKey), 'worktree should appear in list before deletion');
 
     // Manually delete the worktree directory (simulate orphan)
+    // eslint-disable-next-line local/no-raw-rmsync-in-tests -- mid-test fault injection: simulates an orphaned worktree dir that git still references
     fs.rmSync(worktreeDir, { recursive: true, force: true });
 
     // Act

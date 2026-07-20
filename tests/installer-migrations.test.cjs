@@ -10,18 +10,20 @@ const {
   classifyArtifact,
   discoverInstallerMigrations,
   INSTALL_STATE_NAME,
+  migrationChecksum,
   planInstallerMigrations,
   readInstallState,
   runInstallerMigrations,
   writeInstallState,
-} = require('../get-shit-done/bin/lib/installer-migrations.cjs');
-const firstTimeBaselineMigration = require('../get-shit-done/bin/lib/installer-migrations/000-first-time-baseline.cjs');
+} = require('../gsd-core/bin/lib/installer-migrations.cjs');
+const firstTimeBaselineMigration = require('../gsd-core/bin/lib/installer-migrations/000-first-time-baseline.cjs');
 
 function createTempInstall() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-installer-migrations-'));
 }
 
 function cleanup(dir) {
+  // eslint-disable-next-line local/no-raw-rmsync-in-tests -- local cleanup predates helpers.cjs; name collision prevents import
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
@@ -93,10 +95,10 @@ function userHook(command) {
 test('records a first-time baseline while preserving user-owned artifacts', () => {
   const configDir = createTempInstall();
   try {
-    writeFile(configDir, 'get-shit-done/workflows/plan.md', 'managed workflow\n');
-    writeFile(configDir, 'get-shit-done/USER-PROFILE.md', 'user profile\n');
+    writeFile(configDir, 'gsd-core/workflows/plan.md', 'managed workflow\n');
+    writeFile(configDir, 'gsd-core/USER-PROFILE.md', 'user profile\n');
     writeManifest(configDir, {
-      'get-shit-done/workflows/plan.md': sha256('managed workflow\n'),
+      'gsd-core/workflows/plan.md': sha256('managed workflow\n'),
     });
 
     const result = runInstallerMigrations({
@@ -109,8 +111,8 @@ test('records a first-time baseline while preserving user-owned artifacts', () =
     });
 
     assert.deepEqual(result.appliedMigrationIds, ['2026-05-11-first-time-baseline-scan']);
-    assert.equal(fs.readFileSync(path.join(configDir, 'get-shit-done/workflows/plan.md'), 'utf8'), 'managed workflow\n');
-    assert.equal(fs.readFileSync(path.join(configDir, 'get-shit-done/USER-PROFILE.md'), 'utf8'), 'user profile\n');
+    assert.equal(fs.readFileSync(path.join(configDir, 'gsd-core/workflows/plan.md'), 'utf8'), 'managed workflow\n');
+    assert.equal(fs.readFileSync(path.join(configDir, 'gsd-core/USER-PROFILE.md'), 'utf8'), 'user profile\n');
 
     assert.deepEqual(
       result.plan.actions.map((action) => ({
@@ -121,12 +123,12 @@ test('records a first-time baseline while preserving user-owned artifacts', () =
       [
         {
           type: 'record-baseline',
-          relPath: 'get-shit-done/workflows/plan.md',
+          relPath: 'gsd-core/workflows/plan.md',
           classification: 'managed-pristine',
         },
         {
           type: 'baseline-preserve-user',
-          relPath: 'get-shit-done/USER-PROFILE.md',
+          relPath: 'gsd-core/USER-PROFILE.md',
           classification: 'user-owned',
         },
       ]
@@ -479,6 +481,46 @@ test('computes each migration checksum once per planned migration', (t) => {
 
   assert.equal(plan.actions.length, 2);
   assert.equal(checksumReads, 1);
+});
+
+test('tolerates an applied-migration checksum drift instead of aborting the upgrade', (t) => {
+  const configDir = createTempInstall();
+  t.after(() => cleanup(configDir));
+
+  // A migration that a prior release recorded as applied under a DIFFERENT body,
+  // so the stored checksum no longer matches the current computed checksum.
+  const migration = migrationRecord({ id: '2026-05-11-remove-old-hook' });
+  writeInstallState(configDir, {
+    schemaVersion: 1,
+    appliedMigrations: [
+      {
+        id: '2026-05-11-remove-old-hook',
+        appliedAt: '2026-01-01T00:00:00.000Z',
+        journal: null,
+        checksum: 'sha256:stale-pre-1-3-0-value',
+      },
+    ],
+  });
+
+  // Planning must NOT throw, must skip the already-applied migration, and must
+  // surface the drift on the plan for downstream reconciliation.
+  let plan;
+  assert.doesNotThrow(() => {
+    plan = planInstallerMigrations({
+      configDir,
+      migrations: [migration],
+      scope: 'global',
+      now: () => '2026-05-11T00:00:00.000Z',
+    });
+  });
+  assert.deepEqual(plan.pendingMigrationIds, []);
+  assert.equal(plan.actions.length, 0);
+  assert.ok(Array.isArray(plan.checksumDrift));
+  const drift = plan.checksumDrift.find((d) => d.id === '2026-05-11-remove-old-hook');
+  assert.ok(drift, 'expected checksum drift to be reported for the applied migration');
+  assert.equal(drift.storedChecksum, 'sha256:stale-pre-1-3-0-value');
+  assert.match(drift.currentChecksum, /^sha256:/);
+  assert.notEqual(drift.currentChecksum, drift.storedChecksum);
 });
 
 test('classifies large files without loading the whole file through readFileSync', (t) => {
@@ -1062,7 +1104,7 @@ test('marks zero-action pending migrations as applied', () => {
   }
 });
 
-test('refuses to plan an already-applied migration whose checksum changed', () => {
+test('surfaces checksum drift for an already-applied migration without aborting', () => {
   const configDir = createTempInstall();
   try {
     writeManifest(configDir, {});
@@ -1078,8 +1120,9 @@ test('refuses to plan an already-applied migration whose checksum changed', () =
       ],
     });
 
-    assert.throws(
-      () => planInstallerMigrations({
+    let plan;
+    assert.doesNotThrow(() => {
+      plan = planInstallerMigrations({
         configDir,
         migrations: [
           migrationRecord({
@@ -1088,9 +1131,14 @@ test('refuses to plan an already-applied migration whose checksum changed', () =
           }),
         ],
         scope: 'global',
-      }),
-      /applied migration checksum changed/
-    );
+      });
+    });
+    assert.deepEqual(plan.pendingMigrationIds, []);
+    assert.ok(Array.isArray(plan.checksumDrift));
+    const drift = plan.checksumDrift.find((d) => d.id === '2026-05-11-remove-old-hook');
+    assert.ok(drift, 'expected drift entry for the applied migration');
+    assert.equal(drift.storedChecksum, 'sha256:old-definition');
+    assert.equal(drift.currentChecksum, 'sha256:new-definition');
   } finally {
     cleanup(configDir);
   }
@@ -1264,7 +1312,7 @@ test('backs up modified legacy orphan files before removing them', () => {
     const plan = planInstallerMigrations({
       configDir,
       migrations: discoverInstallerMigrations({
-        migrationsDir: path.join(__dirname, '..', 'get-shit-done', 'bin', 'lib', 'installer-migrations'),
+        migrationsDir: path.join(__dirname, '..', 'gsd-core', 'bin', 'lib', 'installer-migrations'),
       }),
       scope: 'global',
       now: () => '2026-05-11T00:00:05.000Z',
@@ -1384,3 +1432,939 @@ test('skips runtime-specific migration records for other runtimes', () => {
     cleanup(configDir);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Checksum-baseline guardrail (issue #670)
+//
+// Shipped installer-migration bodies are immutable: editing a released body
+// breaks the stored checksum for any user who has already applied that
+// migration, which was the root cause of issue #670.
+//
+// This test locks every shipped migration to its committed checksum so that CI
+// catches accidental body edits. When you INTENTIONALLY change the behaviour
+// of a migration you must add a NEW fix-forward migration id instead; if for
+// some extraordinary reason you truly need to update an existing baseline, add
+// the new checksum here with a comment explaining why.
+//
+// Mechanism: compute each migration's checksum directly via the exported
+// migrationChecksum() (scope-independent) and assert it matches the committed
+// baseline. This is simpler and more robust than the previous plan()-based
+// approach because it doesn't depend on runtime/scope filtering.
+// ---------------------------------------------------------------------------
+test('shipped installer-migration checksums are locked to a committed baseline (issue #670 guardrail)', () => {
+  // Committed baseline — update ONLY when adding a new migration or performing an
+  // extraordinary intentional body change (add a comment explaining why). Editing a
+  // shipped migration body breaks the stored checksum for everyone who already applied
+  // it (root cause of #670) — add a NEW fix-forward migration id instead.
+  const EXPECTED_CHECKSUMS = {
+    '2026-05-11-first-time-baseline-scan':
+      'sha256:4ec58d35b30dbf39cc56e3972146086d8d31861ecd800cf0b37a7aa94fe74c2a',
+    '2026-05-11-legacy-orphan-files':
+      'sha256:e492698748a2436a12a55f0940f539b9bf651d8ffcac6f60cd856a6dabd6788c',
+    '2026-05-11-codex-legacy-hooks-json':
+      'sha256:5ce55294aa02f25758f604a569c899a6d2d060299189f5f447f68d8033157058',
+    '2026-06-02-rename-get-shit-done-to-gsd-core':
+      'sha256:3a9f1d97f64097fb313203d19c6d93a187a38df61dd299afa5eef73e16124e95',
+    // Migration 004: prune stale gsd-pristine/get-shit-done/ snapshots (#934) // gsd-allow-legacy-name
+    '2026-06-09-prune-stale-pristine-get-shit-done': // gsd-allow-legacy-name
+      'sha256:6555dd044659276fbc204e81793cd92c5315d54e7316bcdd82d2c98d15a7e9e8',
+  };
+
+  const { DEFAULT_MIGRATIONS_DIR, migrationChecksum: computeChecksum } = require('../gsd-core/bin/lib/installer-migrations.cjs');
+  const migrations = discoverInstallerMigrations({ migrationsDir: DEFAULT_MIGRATIONS_DIR });
+  const discoveredIds = new Set(migrations.map((m) => m.id));
+
+  // No stale baseline entries.
+  for (const id of Object.keys(EXPECTED_CHECKSUMS)) {
+    assert.ok(discoveredIds.has(id),
+      `EXPECTED_CHECKSUMS has a stale entry for '${id}' — that migration no longer exists; remove it`);
+  }
+  // Every discovered migration has a committed baseline entry.
+  for (const id of discoveredIds) {
+    assert.ok(Object.prototype.hasOwnProperty.call(EXPECTED_CHECKSUMS, id),
+      `new migration '${id}' has no committed checksum baseline — add it to EXPECTED_CHECKSUMS in tests/installer-migrations.test.cjs`);
+  }
+  // Core lock: each shipped migration's current checksum must match its committed baseline,
+  // computed directly (scope-independent).
+  for (const m of migrations) {
+    assert.strictEqual(computeChecksum(m), EXPECTED_CHECKSUMS[m.id],
+      `'${m.id}' body changed — its checksum drifted from the committed baseline; ` +
+      `add a NEW fix-forward migration id instead of editing a shipped migration body, ` +
+      `or intentionally update the baseline in EXPECTED_CHECKSUMS`);
+  }
+});
+
+test('reconciles a drifted applied-migration checksum into install state on apply', () => {
+  const configDir = createTempInstall();
+  try {
+    // Set up: one already-applied migration with a stale checksum, one pending migration
+    // that will produce an action (so applyInstallerMigrationPlan writes state).
+    const alreadyAppliedMigration = migrationRecord({
+      id: '2026-05-11-already-applied-with-drift',
+      title: 'Already applied with drift',
+      description: 'Already applied with drift',
+      scopes: ['global'],
+      destructive: false,
+      plan: () => [],
+    });
+    const pendingMigration = migrationRecord({
+      id: '2026-05-11-pending-to-trigger-apply',
+      title: 'Pending migration',
+      description: 'Pending migration',
+      scopes: ['global'],
+      destructive: true,
+      plan: () => [
+        {
+          type: 'remove-managed',
+          relPath: 'hooks/old-hook.js',
+          reason: 'retiring hook',
+          ownershipEvidence: 'test fixture manifest-managed hook',
+        },
+      ],
+    });
+
+    writeFile(configDir, 'hooks/old-hook.js', 'managed hook\n');
+    writeManifest(configDir, {
+      'hooks/old-hook.js': sha256('managed hook\n'),
+    });
+
+    // Seed install state: alreadyAppliedMigration recorded with a STALE checksum.
+    writeInstallState(configDir, {
+      schemaVersion: 1,
+      appliedMigrations: [
+        {
+          id: alreadyAppliedMigration.id,
+          appliedAt: '2026-01-01T00:00:00.000Z',
+          journal: null,
+          checksum: 'sha256:stale-old',
+        },
+      ],
+    });
+
+    const plan = planInstallerMigrations({
+      configDir,
+      migrations: [alreadyAppliedMigration, pendingMigration],
+      scope: 'global',
+      now: () => '2026-05-11T00:00:00.000Z',
+    });
+
+    // The already-applied migration should appear in checksumDrift.
+    const drift = plan.checksumDrift.find((d) => d.id === alreadyAppliedMigration.id);
+    assert.ok(drift, 'expected checksumDrift entry for the already-applied migration');
+    assert.equal(drift.storedChecksum, 'sha256:stale-old');
+
+    // Apply the plan (the pending migration has an action, so this writes state).
+    applyInstallerMigrationPlan({
+      configDir,
+      plan,
+      now: () => '2026-05-11T00:00:01.000Z',
+    });
+
+    // Re-read install state and assert the stale checksum was reconciled.
+    const stateAfter = readInstallState(configDir);
+    const reconciledEntry = stateAfter.appliedMigrations.find(
+      (entry) => entry.id === alreadyAppliedMigration.id
+    );
+    assert.ok(reconciledEntry, 'expected the already-applied entry to still be in install state');
+    const expectedChecksum = migrationChecksum(alreadyAppliedMigration);
+    assert.strictEqual(
+      reconciledEntry.checksum,
+      expectedChecksum,
+      `expected checksum to be reconciled to current value (${expectedChecksum}), not the stale 'sha256:stale-old'`
+    );
+    assert.notEqual(reconciledEntry.checksum, 'sha256:stale-old',
+      'stale checksum must not remain after apply');
+  } finally {
+    cleanup(configDir);
+  }
+});
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Folded from tests/bug-3357-codex-legacy-hooks-json-migration.test.cjs — consolidation epic #1969 (B5 #1974)
+// ────────────────────────────────────────────────────────────────────────
+{
+  const { describe: __foldDescribe } = require('node:test');
+  __foldDescribe("folded:bug-3357-codex-legacy-hooks-json-migration (consolidation epic #1969 B5 #1974)", () => {
+/**
+ * Regression test for bug #3357.
+ *
+ * Older Codex installs carried legacy GSD SessionStart commands in hooks.json.
+ * Current install keeps the managed SessionStart hook in hooks.json (single
+ * representation per layer) and strips stale managed entries before writing
+ * exactly one canonical managed command.
+ *
+ * Bug #1348 (addendum): reconcileCodexHooksJsonEvent must always write the
+ * canonical nested { "hooks": { "<Event>": [...] } } shape — never top-level
+ * event keys — mirroring reconcileCursorHooksJson.
+ */
+
+'use strict';
+
+process.env.GSD_TEST_MODE = '1';
+
+const { describe, test, beforeEach, afterEach } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+
+const installModule = require('../bin/install.js');
+const { readInstallState } = require('../gsd-core/bin/lib/installer-migrations.cjs');
+const { install, parseTomlToObject, reconcileCodexHooksJsonEvent } = installModule;
+const { createTempDir, cleanup } = require('./helpers.cjs');
+const HOOKS_DIST = path.join(__dirname, '..', 'hooks', 'dist');
+const BUILD_HOOKS_SCRIPT = path.join(__dirname, '..', 'scripts', 'build-hooks.js');
+
+function withCodexHome(codexHome, fn) {
+  const previousCodexHome = process.env.CODEX_HOME;
+  // #2088 (ADR-1239 upgrade 3): Codex skills now install to $HOME/.agents/skills
+  // (os.homedir()-relative, independent of CODEX_HOME). Sandbox HOME (and
+  // USERPROFILE) to codexHome so in-process installs never write to the
+  // developer/CI machine's real home directory.
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  process.env.CODEX_HOME = codexHome;
+  process.env.HOME = codexHome;
+  process.env.USERPROFILE = codexHome;
+  try {
+    return fn();
+  } finally {
+    if (previousCodexHome == null) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    if (previousHome == null) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile == null) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+  }
+}
+
+function legacyGsdHook(codexHome) {
+  return {
+    hooks: [{
+      type: 'command',
+      command: `node "${path.join(codexHome, 'hooks', 'gsd-check-update.js')}"`,
+    }],
+  };
+}
+
+function userHook() {
+  return {
+    hooks: [{
+      type: 'command',
+      command: 'node "/Users/example/bin/user-hook.js"',
+    }],
+  };
+}
+
+function tomlGsdHookCount(codexHome) {
+  const parsed = parseTomlToObject(fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8'));
+  const sessionStart = parsed.hooks?.SessionStart ?? [];
+  return sessionStart
+    .flatMap((entry) => Array.isArray(entry.hooks) ? entry.hooks : [])
+    .filter((hook) => typeof hook.command === 'string' && hook.command.includes('gsd-check-update'))
+    .length;
+}
+
+describe('#3357 — Codex install removes legacy GSD hooks.json entries', { concurrency: false }, () => {
+  let tmpRoot;
+  let codexHome;
+
+  beforeEach(() => {
+    if (!fs.existsSync(HOOKS_DIST) || fs.readdirSync(HOOKS_DIST).length === 0) {
+      execFileSync(process.execPath, [BUILD_HOOKS_SCRIPT], { stdio: 'pipe' });
+    }
+    tmpRoot = createTempDir('gsd-3357-');
+    codexHome = path.join(tmpRoot, '.codex');
+    fs.mkdirSync(codexHome, { recursive: true });
+  });
+
+  afterEach(() => {
+    delete installModule.__codexSchemaValidator;
+    cleanup(tmpRoot);
+  });
+
+  test('rewrites hooks.json to one managed SessionStart hook when file only had legacy managed entry', () => {
+    fs.writeFileSync(
+      path.join(codexHome, 'hooks.json'),
+      JSON.stringify({ SessionStart: [legacyGsdHook(codexHome)] }, null, 2),
+    );
+
+    withCodexHome(codexHome, () => install(true, 'codex'));
+
+    // #1348: output must be nested { hooks: { SessionStart: [...] } }, not top-level
+    const hooksJson = JSON.parse(fs.readFileSync(path.join(codexHome, 'hooks.json'), 'utf8'));
+    assert.ok(
+      hooksJson.hooks && typeof hooksJson.hooks === 'object' && !Array.isArray(hooksJson.hooks),
+      'hooks.json must use nested { hooks: { ... } } shape (bug #1348)',
+    );
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(hooksJson, 'SessionStart'),
+      'hooks.json must NOT have a top-level SessionStart key (bug #1348)',
+    );
+    const commands = hooksJson.hooks.SessionStart.flatMap((entry) => entry.hooks).map((hook) => hook.command);
+    const managed = commands.filter((cmd) => typeof cmd === 'string' && cmd.includes('gsd-check-update'));
+    assert.equal(managed.length, 1);
+    assert.equal(tomlGsdHookCount(codexHome), 0);
+  });
+
+  test('preserves user hooks.json entries while removing the legacy GSD hook', () => {
+    const userOwnedSameBasenameHook = {
+      hooks: [{
+        type: 'command',
+        command: 'node "/Users/example/bin/gsd-check-update.js"',
+      }],
+    };
+    fs.writeFileSync(
+      path.join(codexHome, 'hooks.json'),
+      JSON.stringify({ SessionStart: [legacyGsdHook(codexHome), userHook(), userOwnedSameBasenameHook] }, null, 2),
+    );
+
+    withCodexHome(codexHome, () => install(true, 'codex'));
+
+    // #1348: output must be nested { hooks: { SessionStart: [...] } }, not top-level
+    const hooksJson = JSON.parse(fs.readFileSync(path.join(codexHome, 'hooks.json'), 'utf8'));
+    assert.ok(
+      hooksJson.hooks && typeof hooksJson.hooks === 'object' && !Array.isArray(hooksJson.hooks),
+      'hooks.json must use nested { hooks: { ... } } shape (bug #1348)',
+    );
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(hooksJson, 'SessionStart'),
+      'hooks.json must NOT have a top-level SessionStart key (bug #1348)',
+    );
+    const commands = hooksJson.hooks.SessionStart.flatMap((entry) => entry.hooks).map((hook) => hook.command);
+    const managed = commands.filter((cmd) => typeof cmd === 'string' && cmd.includes('gsd-check-update'));
+    assert.equal(commands.includes('node "/Users/example/bin/user-hook.js"'), true);
+    assert.equal(commands.includes('node "/Users/example/bin/gsd-check-update.js"'), true);
+    assert.equal(managed.length, 2);
+    assert.equal(tomlGsdHookCount(codexHome), 0);
+  });
+
+  test('restores migrated hooks.json and install state when later Codex validation fails', () => {
+    const before = JSON.stringify({ SessionStart: [legacyGsdHook(codexHome)] }, null, 2);
+    fs.writeFileSync(path.join(codexHome, 'hooks.json'), before);
+
+    installModule.__codexSchemaValidator = () => ({
+      ok: false,
+      reason: 'forced migration rollback test',
+    });
+
+    assert.throws(
+      () => withCodexHome(codexHome, () => install(true, 'codex')),
+      /forced migration rollback test/
+    );
+
+    assert.equal(fs.readFileSync(path.join(codexHome, 'hooks.json'), 'utf8'), before);
+    assert.equal(
+      readInstallState(codexHome).appliedMigrations.some((entry) => entry.id === '2026-05-11-codex-legacy-hooks-json'),
+      false
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1348 — reconcileCodexHooksJsonEvent must always write canonical nested shape
+// ---------------------------------------------------------------------------
+
+describe('#1348 — reconcileCodexHooksJsonEvent canonical nested shape', { concurrency: false }, () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempDir('gsd-1348-');
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  // (a) Fresh/absent hooks.json: register → { "hooks": { "SessionStart": [...] } }
+  test('(a) fresh/absent hooks.json writes nested { hooks: { SessionStart: [...] } } shape', () => {
+    const hooksJsonPath = path.join(tmpDir, 'hooks.json');
+    const FAKE_CMD = `"/usr/local/bin/node" "${path.join(tmpDir, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/')}"`;
+    assert.ok(!fs.existsSync(hooksJsonPath), 'precondition: hooks.json must not exist');
+
+    reconcileCodexHooksJsonEvent(tmpDir, 'SessionStart', { managedCommand: FAKE_CMD });
+
+    assert.ok(fs.existsSync(hooksJsonPath), 'hooks.json must be created');
+    const hooksJson = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf8'));
+
+    assert.ok(
+      hooksJson.hooks && typeof hooksJson.hooks === 'object' && !Array.isArray(hooksJson.hooks),
+      `Expected nested { hooks: { ... } } shape; got: ${JSON.stringify(hooksJson)}`,
+    );
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(hooksJson, 'SessionStart'),
+      `hooks.json must NOT have a top-level SessionStart key; got: ${JSON.stringify(hooksJson)}`,
+    );
+    assert.ok(
+      Array.isArray(hooksJson.hooks.SessionStart) && hooksJson.hooks.SessionStart.length > 0,
+      `Expected hooks.hooks.SessionStart to be a non-empty array; got: ${JSON.stringify(hooksJson)}`,
+    );
+  });
+
+  // (b) Legacy migration: seed top-level { "SessionStart": [<user>] }, register →
+  //   nested hooks.SessionStart contains BOTH migrated user entry AND managed entry
+  test('(b) legacy top-level shape: user entries migrate into hooks.SessionStart alongside managed entry', () => {
+    const FAKE_CMD = `"/usr/local/bin/node" "${path.join(tmpDir, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/')}"`;
+    const userEntry = { hooks: [{ type: 'command', command: 'node "/Users/alice/my-hook.js"' }] };
+    fs.writeFileSync(
+      path.join(tmpDir, 'hooks.json'),
+      JSON.stringify({ SessionStart: [userEntry] }, null, 2),
+    );
+
+    reconcileCodexHooksJsonEvent(tmpDir, 'SessionStart', { managedCommand: FAKE_CMD });
+
+    const hooksJson = JSON.parse(fs.readFileSync(path.join(tmpDir, 'hooks.json'), 'utf8'));
+
+    // Canonical nested shape
+    assert.ok(
+      hooksJson.hooks && typeof hooksJson.hooks === 'object' && !Array.isArray(hooksJson.hooks),
+      `Expected nested { hooks: { ... } } shape; got: ${JSON.stringify(hooksJson)}`,
+    );
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(hooksJson, 'SessionStart'),
+      `hooks.json must NOT have a top-level SessionStart key; got: ${JSON.stringify(hooksJson)}`,
+    );
+
+    // User entry was migrated under hooks.SessionStart (not dropped)
+    const allCommands = hooksJson.hooks.SessionStart
+      .flatMap((e) => Array.isArray(e.hooks) ? e.hooks : [])
+      .map((h) => h.command);
+    assert.ok(
+      allCommands.includes('node "/Users/alice/my-hook.js"'),
+      `User entry must be preserved under hooks.SessionStart; commands: ${JSON.stringify(allCommands)}`,
+    );
+
+    // Managed entry is also present
+    const managedCount = allCommands.filter((c) => typeof c === 'string' && c.includes('gsd-check-update')).length;
+    assert.equal(managedCount, 1, 'Exactly one managed entry must be present under hooks.SessionStart');
+  });
+
+  // (c-i) Dedup: re-registering the same managed command does not duplicate it
+  test('(c-i) re-registering managed command produces exactly one managed entry', () => {
+    const FAKE_CMD = `"/usr/local/bin/node" "${path.join(tmpDir, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/')}"`;
+    reconcileCodexHooksJsonEvent(tmpDir, 'SessionStart', { managedCommand: FAKE_CMD });
+    reconcileCodexHooksJsonEvent(tmpDir, 'SessionStart', { managedCommand: FAKE_CMD });
+
+    const hooksJson = JSON.parse(fs.readFileSync(path.join(tmpDir, 'hooks.json'), 'utf8'));
+    const allCommands = hooksJson.hooks.SessionStart
+      .flatMap((e) => Array.isArray(e.hooks) ? e.hooks : [])
+      .map((h) => h.command);
+    const managedCount = allCommands.filter((c) => typeof c === 'string' && c.includes('gsd-check-update')).length;
+    assert.equal(managedCount, 1, 'Re-register must yield exactly one managed entry');
+  });
+
+  // (c-ii) Removal: user entries remain under hooks, managed entry is gone
+  test('(c-ii) removing managed hook leaves user entry under hooks.SessionStart', () => {
+    const FAKE_CMD = `"/usr/local/bin/node" "${path.join(tmpDir, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/')}"`;
+    const userEntry = { hooks: [{ type: 'command', command: 'node "/Users/alice/my-hook.js"' }] };
+    // Seed already-nested file with both user + managed
+    reconcileCodexHooksJsonEvent(tmpDir, 'SessionStart', { managedCommand: FAKE_CMD });
+    // Now manually seed a user entry into the existing nested file
+    const seeded = JSON.parse(fs.readFileSync(path.join(tmpDir, 'hooks.json'), 'utf8'));
+    seeded.hooks.SessionStart = [userEntry, ...seeded.hooks.SessionStart];
+    fs.writeFileSync(path.join(tmpDir, 'hooks.json'), JSON.stringify(seeded, null, 2));
+
+    // Remove managed
+    reconcileCodexHooksJsonEvent(tmpDir, 'SessionStart', { managedCommand: null });
+
+    const hooksJson = JSON.parse(fs.readFileSync(path.join(tmpDir, 'hooks.json'), 'utf8'));
+    // User entry must still be under hooks.SessionStart
+    const allCommands = hooksJson.hooks.SessionStart
+      .flatMap((e) => Array.isArray(e.hooks) ? e.hooks : [])
+      .map((h) => h.command);
+    assert.ok(
+      allCommands.includes('node "/Users/alice/my-hook.js"'),
+      `User entry must remain after managed removal; commands: ${JSON.stringify(allCommands)}`,
+    );
+    // No managed entry
+    const managedCount = allCommands.filter((c) => typeof c === 'string' && c.includes('gsd-check-update')).length;
+    assert.equal(managedCount, 0, 'No managed entry must remain after removal');
+  });
+
+  // (c-iii) Removal from absent file does NOT materialize { "hooks": {} }
+  test('(c-iii) removing from absent hooks.json does not write a spurious empty { "hooks": {} }', () => {
+    const hooksJsonPath = path.join(tmpDir, 'hooks.json');
+    assert.ok(!fs.existsSync(hooksJsonPath), 'precondition: hooks.json must not exist');
+
+    reconcileCodexHooksJsonEvent(tmpDir, 'SessionStart', { managedCommand: null });
+
+    assert.ok(
+      !fs.existsSync(hooksJsonPath),
+      'hooks.json must NOT be created when removing from absent file (no spurious { "hooks": {} })',
+    );
+  });
+
+  // (d) Mixed nested + top-level shape: { "hooks": { "PreToolUse": [...] }, "SessionStart": [...] }
+  // The stray top-level event array must be lifted into hooks and merged; no top-level key survives.
+  test('(d) mixed nested + top-level shape: stray top-level event array is lifted and merged', () => {
+    const FAKE_CMD = `"/usr/local/bin/node" "${path.join(tmpDir, 'hooks', 'gsd-check-update.js').replace(/\\/g, '/')}"`;
+    const existingNestedEntry = { hooks: [{ type: 'command', command: 'node "/Users/alice/pre-tool.js"' }] };
+    const userTopLevelEntry = { hooks: [{ type: 'command', command: 'node "/Users/alice/session-start.js"' }] };
+
+    // Seed a mixed-shape file: nested PreToolUse AND top-level SessionStart
+    fs.writeFileSync(
+      path.join(tmpDir, 'hooks.json'),
+      JSON.stringify(
+        {
+          hooks: { PreToolUse: [existingNestedEntry] },
+          SessionStart: [userTopLevelEntry],
+        },
+        null,
+        2,
+      ),
+    );
+
+    reconcileCodexHooksJsonEvent(tmpDir, 'SessionStart', { managedCommand: FAKE_CMD });
+
+    const hooksJson = JSON.parse(fs.readFileSync(path.join(tmpDir, 'hooks.json'), 'utf8'));
+
+    // No stray top-level SessionStart key
+    assert.ok(
+      !Object.prototype.hasOwnProperty.call(hooksJson, 'SessionStart'),
+      `hooks.json must NOT have a top-level SessionStart key; got: ${JSON.stringify(hooksJson)}`,
+    );
+
+    // hooks.SessionStart contains the migrated user entry AND exactly one managed entry
+    assert.ok(
+      Array.isArray(hooksJson.hooks.SessionStart),
+      `hooks.hooks.SessionStart must be an array; got: ${JSON.stringify(hooksJson)}`,
+    );
+    const sessionCommands = hooksJson.hooks.SessionStart
+      .flatMap((e) => Array.isArray(e.hooks) ? e.hooks : [])
+      .map((h) => h.command);
+    assert.ok(
+      sessionCommands.includes('node "/Users/alice/session-start.js"'),
+      `Migrated user entry must be present in hooks.SessionStart; commands: ${JSON.stringify(sessionCommands)}; full: ${JSON.stringify(hooksJson)}`,
+    );
+    const managedCount = sessionCommands.filter((c) => typeof c === 'string' && c.includes('gsd-check-update')).length;
+    assert.equal(managedCount, 1, `Exactly one managed entry must be present in hooks.SessionStart; commands: ${JSON.stringify(sessionCommands)}`);
+
+    // hooks.PreToolUse is untouched
+    assert.ok(
+      Array.isArray(hooksJson.hooks.PreToolUse) && hooksJson.hooks.PreToolUse.length === 1,
+      `hooks.hooks.PreToolUse must be preserved with one entry; got: ${JSON.stringify(hooksJson.hooks.PreToolUse)}`,
+    );
+    const preToolCommands = hooksJson.hooks.PreToolUse
+      .flatMap((e) => Array.isArray(e.hooks) ? e.hooks : [])
+      .map((h) => h.command);
+    assert.ok(
+      preToolCommands.includes('node "/Users/alice/pre-tool.js"'),
+      `Existing nested PreToolUse entry must be preserved; commands: ${JSON.stringify(preToolCommands)}`,
+    );
+  });
+});
+  });
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Folded from tests/bug-3670-cursor-local-install-migration-lock.test.cjs — consolidation epic #1969 (B5 #1974)
+// ────────────────────────────────────────────────────────────────────────
+{
+  const { describe: __foldDescribe } = require('node:test');
+  __foldDescribe("folded:bug-3670-cursor-local-install-migration-lock (consolidation epic #1969 B5 #1974)", () => {
+/**
+ * Regression tests for issue #3670: --cursor --local install self-deadlocks
+ * on gsd-install-migration.lock.
+ *
+ * Root cause: On Windows, `fs.rmSync(lockPath, { force: true })` in the lock
+ * release closure silently swallows EPERM errors that NTFS returns when a
+ * recently-closed file descriptor's handle has not yet been fully released by
+ * the OS. The lock file is left on disk. The next `runInstallerMigrations`
+ * call in the same install() invocation hits EEXIST, spins for
+ * DEFAULT_LOCK_TIMEOUT_MS (30 s), then throws "installer migration lock is
+ * held". There is also no stale-PID reclamation: if the lock names the
+ * current process's PID, the helper should reclaim rather than spin.
+ *
+ * Windows wall-clock deadlock repro depends on Docker matrix Windows runners.
+ * These tests reproduce the failure modes via mock-injected fs faults on any
+ * platform (macOS/Linux/Windows). They fail deterministically WITHOUT the fix
+ * and pass WITH it.
+ *
+ * Test plan:
+ *   T1 (same-process re-entry / stale-PID reclamation — primary regression)
+ *      Pre-seed the lock file with {pid: process.pid, ...}. Verify that a
+ *      runInstallerMigrations call reclaims the lock and succeeds rather than
+ *      spinning 30 s and throwing.
+ *
+ *   T2 (dead-PID reclamation — cross-invocation stale lock)
+ *      Pre-seed the lock file with a PID known to be dead. Verify that acquire
+ *      reclaims rather than throws.
+ *
+ *   T3 (silent rmSync swallow / Windows EPERM simulation)
+ *      Inject a fault that makes fs.rmSync throw EPERM for the lock file only
+ *      (simulating Windows NTFS delete-pending). Verify that the lock file IS
+ *      removed by an alternative path (or that the error propagates) — i.e.
+ *      verify that the fix does not silently leave the lock on disk.
+ *
+ *   T4 (counter-test: normal single acquire/release round-trip still works)
+ *      No pre-seeded lock. One runInstallerMigrations call. Must succeed and
+ *      leave no lock file behind.
+ *
+ *   T5 (counter-test: genuinely-held live lock still surfaces an error)
+ *      Pre-seed lock with a live PID (process.pid) AND simulate a lock that
+ *      has been "truly acquired" (fd still open). With lockTimeoutMs: 0 and a
+ *      truly un-reclaimable lock, must still throw with a useful message naming
+ *      the holder PID. (This guards against over-reclamation.)
+ *
+ * @see https://github.com/open-gsd/gsd-core/issues/3670
+ */
+
+'use strict';
+
+const { test, mock } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const {
+  INSTALL_MIGRATION_LOCK_NAME,
+  runInstallerMigrations,
+} = require('../gsd-core/bin/lib/installer-migrations.cjs');
+const { cleanup } = require('./helpers.cjs');
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function createTempDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-3670-'));
+}
+
+function lockPath(dir) {
+  return path.join(dir, INSTALL_MIGRATION_LOCK_NAME);
+}
+
+function writeLockFile(dir, pid, acquiredAt) {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    lockPath(dir),
+    JSON.stringify({ pid, acquiredAt: acquiredAt || new Date().toISOString() }) + '\n',
+    'utf8'
+  );
+}
+
+/**
+ * Find a PID that is guaranteed to be dead on this host.
+ * We probe a set of high candidate PIDs (far outside the running set) and
+ * pick the first one for which process.kill(pid, 0) throws ESRCH.
+ * Falls back to 99999 if the probe loop exhausts (extremely unlikely).
+ */
+function findDeadPid() {
+  // Avoid process.pid ± small numbers — those could be live siblings.
+  for (let candidate = 600000; candidate < 700000; candidate += 1000) {
+    try {
+      process.kill(candidate, 0);
+      // Still alive (or permission denied but exists) — try next
+    } catch (err) {
+      if (err.code === 'ESRCH') return candidate;
+    }
+  }
+  return 99999; // fallback: extremely unlikely to be a live PID
+}
+
+// ---------------------------------------------------------------------------
+// T1: Same-process re-entry — stale lock with current process.pid reclaimed
+// ---------------------------------------------------------------------------
+test('T1: reclaims stale lock that names the current process PID (same-process re-entry)', (t) => {
+  const configDir = createTempDir();
+  t.after(() => cleanup(configDir));
+
+  // Pre-seed lock file with the CURRENT process's PID — exactly what happens
+  // on Windows when rmSync swallows EPERM after the first runInstallerMigrations
+  // call releases (or fails to release) the lock.
+  writeLockFile(configDir, process.pid);
+
+  // Without the fix: this would spin for lockTimeoutMs then throw.
+  // With the fix: detects own PID → reclaims → succeeds.
+  // lockTimeoutMs: 200 (fail fast so the test doesn't hang for 30 s without fix)
+  const result = runInstallerMigrations({
+    configDir,
+    migrations: [],
+    lockTimeoutMs: 200,
+  });
+
+  assert.ok(result, 'runInstallerMigrations must return a result object');
+  // Lock file must be removed after the call completes.
+  assert.equal(
+    fs.existsSync(lockPath(configDir)),
+    false,
+    'lock file must not remain on disk after successful runInstallerMigrations'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T2: Dead-PID reclamation — cross-invocation stale lock
+// ---------------------------------------------------------------------------
+test('T2: reclaims stale lock whose PID is no longer alive', (t) => {
+  const configDir = createTempDir();
+  t.after(() => cleanup(configDir));
+
+  const deadPid = findDeadPid();
+  writeLockFile(configDir, deadPid);
+
+  const result = runInstallerMigrations({
+    configDir,
+    migrations: [],
+    lockTimeoutMs: 200,
+  });
+
+  assert.ok(result, 'runInstallerMigrations must return a result object');
+  assert.equal(
+    fs.existsSync(lockPath(configDir)),
+    false,
+    'lock file must not remain on disk after stale-PID reclamation'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T3: Windows EPERM simulation — unlinkSync failure surfaces (not silently swallowed)
+// ---------------------------------------------------------------------------
+test('T3: lock release does not silently leave lock file on disk when unlink fails (Windows EPERM simulation)', (t) => {
+  const configDir = createTempDir();
+  const originalUnlinkSync = fs.unlinkSync;
+
+  t.after(() => {
+    fs.unlinkSync = originalUnlinkSync;
+    cleanup(configDir);
+  });
+
+  // The fix uses fs.unlinkSync (not fs.rmSync with { force: true }) in the
+  // release closure. Inject EPERM on the lock file to simulate the Windows
+  // NTFS condition where the recently-closed handle has not been fully
+  // released by the OS.
+  //
+  // The fix's contract: EPERM must NOT be silently swallowed.
+  // Either (a) the error propagates as a releaseError, or (b) some alternative
+  // deletion path succeeds. Silent-swallow (no error + file still exists) is
+  // the failure condition we guard against.
+  let unlinkCallCount = 0;
+  fs.unlinkSync = function faultInjectUnlinkSync(targetPath) {
+    const isLock = path.basename(String(targetPath)) === INSTALL_MIGRATION_LOCK_NAME;
+    if (isLock) {
+      unlinkCallCount++;
+      // Simulate Windows EPERM (file handle not fully released by OS)
+      const err = Object.assign(
+        new Error('EPERM: operation not permitted, unlink ' + targetPath),
+        { code: 'EPERM' }
+      );
+      throw err;
+    }
+    return originalUnlinkSync.call(fs, targetPath);
+  };
+
+  // With the fix: unlinkSync throws EPERM → releaseError is thrown by the
+  // release closure → runInstallerMigrations throws releaseError.
+  // With the buggy code (rmSync + force:true): EPERM was swallowed silently,
+  // no error thrown, lock file left on disk.
+  //
+  // Assert: if the call succeeds (no throw), the lock file must be gone.
+  // If the call throws, the error message must reference the lock.
+  let threw = false;
+  let thrownError = null;
+  try {
+    runInstallerMigrations({
+      configDir,
+      migrations: [],
+      lockTimeoutMs: 500,
+    });
+  } catch (err) {
+    threw = true;
+    thrownError = err;
+  }
+
+  if (threw) {
+    // Acceptable: error surfaced. Verify it's lock-related (not a bug elsewhere).
+    assert.match(
+      thrownError.message,
+      /lock/i,
+      'thrown error must reference the lock file'
+    );
+  } else {
+    // If no error was thrown, the lock file must have been removed by some
+    // alternative path (not left silently on disk).
+    assert.equal(
+      fs.existsSync(lockPath(configDir)),
+      false,
+      'if unlinkSync EPERM is encountered but no error thrown, lock file must still be removed'
+    );
+  }
+
+  // Sanity: the fault injection was actually triggered.
+  assert.ok(unlinkCallCount > 0, 'unlinkSync must have been called for the lock file at least once');
+});
+
+// ---------------------------------------------------------------------------
+// T4: Counter-test — normal single acquire/release round-trip still works
+// ---------------------------------------------------------------------------
+test('T4: normal (non-recursive) runInstallerMigrations acquires and releases lock correctly', (t) => {
+  const configDir = createTempDir();
+  t.after(() => cleanup(configDir));
+
+  // No pre-seeded lock. Standard happy path.
+  const result = runInstallerMigrations({
+    configDir,
+    migrations: [],
+  });
+
+  assert.ok(result, 'runInstallerMigrations must return a result');
+  assert.equal(
+    fs.existsSync(lockPath(configDir)),
+    false,
+    'lock file must be cleaned up after normal completion'
+  );
+});
+
+// ---------------------------------------------------------------------------
+// T5: Counter-test — unreclaimable live lock must surface a bounded error
+// ---------------------------------------------------------------------------
+// This test guards against over-reclamation: if the reclaim-unlink fails
+// (e.g. Windows EPERM on a live open handle), the fix must NOT spin
+// indefinitely — it must fall through to the timeout path and throw.
+//
+// Conditions forced by this test:
+//   1. Lock file contains the CURRENT process.pid (triggers isSameProcess branch).
+//   2. fs.unlinkSync is mocked to throw EPERM for the lock file (reclaim fails).
+//   3. lockTimeoutMs: 200 — timeout must fire within a short wall-clock window.
+//
+// Expected outcome: throws with /installer migration lock is held/ within
+// ~200ms. SUCCESS (no throw) is NOT acceptable here — that would mean the fix
+// over-reclaimed a lock that it couldn't actually remove.
+test('T5: unreclaimable same-PID lock throws bounded error (reclaim-unlink failure falls through to timeout)', (t) => {
+  const configDir = createTempDir();
+  const originalUnlinkSync = fs.unlinkSync;
+
+  t.after(() => {
+    mock.restoreAll();
+    fs.unlinkSync = originalUnlinkSync;
+    cleanup(configDir);
+  });
+
+  // Pre-seed lock file with the CURRENT process's PID.
+  // This triggers the isSameProcess reclamation path inside acquireInstallerMigrationLock.
+  writeLockFile(configDir, process.pid);
+
+  // Mock unlinkSync to throw EPERM for the lock file only.
+  // This simulates Windows NTFS refusing to delete a file with an open handle.
+  // With the fix: reclaim-unlink fails → reclaimed=false → falls through to
+  //   the timeout check → throws "installer migration lock is held" after ≤200ms.
+  // Without the fix (original code): unlink throws but continue runs anyway →
+  //   spins indefinitely, never reaches the timeout check → deadlock.
+  mock.method(fs, 'unlinkSync', function faultInjectUnlinkSync(targetPath) {
+    const isLock = path.basename(String(targetPath)) === INSTALL_MIGRATION_LOCK_NAME;
+    if (isLock) {
+      const err = Object.assign(
+        new Error('EPERM: operation not permitted, unlink ' + targetPath),
+        { code: 'EPERM' }
+      );
+      throw err;
+    }
+    return originalUnlinkSync.call(fs, targetPath);
+  });
+
+  assert.throws(
+    () => runInstallerMigrations({
+      configDir,
+      migrations: [],
+      lockTimeoutMs: 200,
+    }),
+    (err) => {
+      assert.match(err.message, /installer migration lock is held/, 'error must name the held lock');
+      return true;
+    },
+    'must throw "installer migration lock is held" when reclaim-unlink fails — not spin indefinitely'
+  );
+});
+  });
+}
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Folded from tests/installer-migrations/001-legacy-orphan-files.test.cjs — consolidation epic #1969 (B5 #1974)
+// ────────────────────────────────────────────────────────────────────────
+{
+  const { describe: __foldDescribe } = require('node:test');
+  __foldDescribe("folded:installer-migrations/001-legacy-orphan-files (consolidation epic #1969 B5 #1974)", () => {
+'use strict';
+
+/**
+ * Characterization tests for the 001-legacy-orphan-files installer migration.
+ * Locks the migration metadata shape and plan() logic (managed-pristine and
+ * managed-modified classification paths; unmanaged artifacts are skipped).
+ */
+const { describe, test } = require('node:test');
+const assert = require('node:assert/strict');
+
+const migration = require('../gsd-core/bin/lib/installer-migrations/001-legacy-orphan-files.cjs');
+
+describe('migration metadata', () => {
+  test('exports a single migration object with required fields', () => {
+    assert.equal(typeof migration, 'object');
+    assert.equal(migration.id, '2026-05-11-legacy-orphan-files');
+    assert.equal(typeof migration.title, 'string');
+    assert.equal(typeof migration.description, 'string');
+    assert.equal(migration.introducedIn, '1.50.0');
+    assert.ok(Array.isArray(migration.scopes));
+    assert.ok(migration.scopes.includes('global'));
+    assert.ok(migration.scopes.includes('local'));
+    assert.strictEqual(migration.destructive, true);
+    assert.equal(typeof migration.plan, 'function');
+  });
+});
+
+describe('migration.plan()', () => {
+  function makeClassifier(classification) {
+    return { classifyArtifact: () => ({ classification }) };
+  }
+
+  test('returns remove-managed action for managed-pristine artifact', () => {
+    const actions = migration.plan(makeClassifier('managed-pristine'));
+    assert.equal(actions.length, 2); // two files in LEGACY_ORPHAN_FILES
+    for (const action of actions) {
+      assert.equal(action.type, 'remove-managed');
+      assert.equal(typeof action.relPath, 'string');
+      assert.equal(typeof action.reason, 'string');
+      assert.equal(typeof action.ownershipEvidence, 'string');
+    }
+  });
+
+  test('returns backup-and-remove action for managed-modified artifact', () => {
+    const actions = migration.plan(makeClassifier('managed-modified'));
+    assert.equal(actions.length, 2);
+    for (const action of actions) {
+      assert.equal(action.type, 'backup-and-remove');
+    }
+  });
+
+  test('returns no actions for unmanaged artifact', () => {
+    const actions = migration.plan(makeClassifier('unmanaged'));
+    assert.deepStrictEqual(actions, []);
+  });
+
+  test('relPaths match the two legacy orphan hook files', () => {
+    const actions = migration.plan(makeClassifier('managed-pristine'));
+    const relPaths = actions.map((a) => a.relPath).sort();
+    assert.deepStrictEqual(relPaths, [
+      'hooks/gsd-notify.sh',
+      'hooks/statusline.js',
+    ]);
+  });
+
+  test('plan handles mixed classifications per file', () => {
+    let callCount = 0;
+    const ctx = {
+      classifyArtifact: (_relPath) => {
+        callCount++;
+        // first call: managed-pristine; second call: unmanaged
+        return { classification: callCount === 1 ? 'managed-pristine' : 'unmanaged' };
+      },
+    };
+    const actions = migration.plan(ctx);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].type, 'remove-managed');
+  });
+});
+  });
+}

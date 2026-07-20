@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * /gsd-ultraplan-phase [BETA] Tests
@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CMD_PATH = path.join(__dirname, '..', 'commands', 'gsd', 'ultraplan-phase.md');
-const WF_PATH = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'ultraplan-phase.md');
+const WF_PATH = path.join(__dirname, '..', 'gsd-core', 'workflows', 'ultraplan-phase.md');
 
 // ─── File Existence ────────────────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ describe('ultraplan-phase file existence', () => {
   });
 
   test('workflow file exists', () => {
-    assert.ok(fs.existsSync(WF_PATH), 'get-shit-done/workflows/ultraplan-phase.md should exist');
+    assert.ok(fs.existsSync(WF_PATH), 'gsd-core/workflows/ultraplan-phase.md should exist');
   });
 });
 
@@ -57,7 +57,7 @@ describe('ultraplan-phase command references', () => {
 
   test('references the ultraplan-phase workflow', () => {
     assert.ok(
-      content.includes('@~/.claude/get-shit-done/workflows/ultraplan-phase.md'),
+      content.includes('@~/.claude/gsd-core/workflows/ultraplan-phase.md'),
       'command should reference ultraplan-phase workflow'
     );
   });
@@ -111,7 +111,11 @@ describe('ultraplan-phase workflow initialization', () => {
   const content = fs.readFileSync(WF_PATH, 'utf-8');
 
   test('loads GSD phase context via gsd-sdk query init.plan-phase', () => {
-    assert.ok(content.includes('gsd-sdk query init.plan-phase'), 'workflow must load phase context via gsd-sdk query init.plan-phase');
+    // After #3797 architectural fix, callsites use gsd_run
+    assert.ok(
+      content.includes('gsd_run query init.plan-phase'),
+      'workflow must load phase context via gsd_run query init.plan-phase',
+    );
   });
 
   test('handles missing .planning directory', () => {

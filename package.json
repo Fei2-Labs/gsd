@@ -1,26 +1,28 @@
 {
   "name": "@fei2-labs/get-shit-done",
-  "version": "1.50.0-canary.0",
+  "version": "1.7.0",
   "description": "A meta-prompting, context engineering and spec-driven development system for Claude Code, OpenCode, Gemini, Kiro, Codex and more. Fork of get-shit-done-cc with Kiro IDE/CLI support.",
+  "main": ".opencode/plugins/gsd-core.js",
   "bin": {
-    "get-shit-done-cc": "bin/install.js",
-    "gsd-sdk": "bin/gsd-sdk.js",
-    "gsd-tools": "bin/gsd-sdk.js"
+    "gsd-core": "bin/install.js",
+    "gsd-tools": "gsd-core/bin/gsd-tools.cjs",
+    "gsd_run": "gsd-core/bin/gsd_run",
+    "gsd-mcp-server": "bin/gsd-mcp-server.js"
   },
   "files": [
     "bin",
     "commands",
-    "get-shit-done",
+    "skills",
+    "gsd-core",
+    "assets",
     "agents",
+    ".claude-plugin",
+    ".opencode",
+    "GEMINI.md",
     "hooks",
     "scripts",
-    "sdk/src",
-    "sdk/shared",
-    "sdk/prompts",
-    "sdk/dist",
-    "sdk/package.json",
-    "sdk/package-lock.json",
-    "sdk/tsconfig.json"
+    "pi",
+    "vscode"
   ],
   "keywords": [
     "claude",
@@ -29,8 +31,6 @@
     "meta-prompting",
     "context-engineering",
     "spec-driven-development",
-    "gemini",
-    "gemini-cli",
     "codex",
     "codex-cli",
     "kiro",
@@ -48,42 +48,76 @@
   "bugs": {
     "url": "https://github.com/Fei2-Labs/gsd/issues"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.84",
-    "ws": "8.20.1"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
-    "c8": "^11.0.0"
+    "@eslint/js": "^9.39.4",
+    "@stryker-mutator/core": "^9.6.1",
+    "@types/node": "^22.19.19",
+    "c8": "^11.0.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-n": "^17.24.0",
+    "eslint-plugin-no-only-tests": "^3.4.0",
+    "fast-check": "^4.8.0",
+    "globals": "^16.5.0",
+    "js-yaml": "^4.2.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.60.0"
+  },
+  "overrides": {
+    "qs": ">=6.15.2"
   },
   "optionalDependencies": {
     "fallow": "^2.70.0"
   },
   "scripts": {
+    "sync:launcher": "node scripts/sync-runtime-launcher.cjs",
+    "check:env": "node scripts/check-env.cjs",
+    "check:alias-drift": "node scripts/check-alias-drift.cjs",
+    "check:identity-drift": "node scripts/lint-package-identity-drift.cjs",
+    "check:phase-id-drift": "node scripts/lint-phase-id-drift.cjs",
+    "check:integrity": "node scripts/check-npm-integrity.cjs",
+    "build": "npm run generate:identity && npm run build:lib && npm run gen:plugin-skills && npm run gen:loop-host-contract && npm run gen:capability-registry && npm run build:hooks",
     "build:hooks": "node scripts/build-hooks.js",
-    "build:sdk": "cd sdk && npm ci && npm run build",
-    "check:alias-drift": "cd sdk && npm run check:alias-drift",
-    "check:state-document-fresh": "cd sdk && npm run check:state-document-fresh",
-    "check:configuration-fresh": "cd sdk && npm run check:configuration-fresh",
-    "check:workstream-inventory-builder-fresh": "cd sdk && npm run check:workstream-inventory-builder-fresh",
-    "check:project-root-fresh": "cd sdk && npm run check:project-root-fresh",
-    "check:plan-scan-fresh": "cd sdk && npm run check:plan-scan-fresh",
-    "check:secrets-fresh": "cd sdk && npm run check:secrets-fresh",
-    "check:schema-detect-fresh": "cd sdk && npm run check:schema-detect-fresh",
-    "check:decisions-fresh": "cd sdk && npm run check:decisions-fresh",
-    "check:workstream-name-policy-fresh": "cd sdk && npm run check:workstream-name-policy-fresh",
-    "prepublishOnly": "npm run build:hooks && npm run build:sdk",
-    "pretest": "npm run build:sdk && npm run lint:skill-deps",
-    "pretest:coverage": "npm run build:sdk",
+    "build:lib": "tsc -p tsconfig.build.json",
+    "generate:identity": "node scripts/generate-package-identity.cjs",
+    "gen:loop-host-contract": "node scripts/gen-loop-host-contract.cjs --write",
+    "gen:plugin-skills": "node scripts/gen-plugin-skills.cjs --write",
+    "gen:capability-registry": "node scripts/gen-capability-registry.cjs --write",
+    "gen:registry": "node scripts/gen-registry.cjs --write",
+    "gen:golden": "node scripts/gen-golden-install-parity-zcode.cjs && node scripts/gen-install-tree-fixtures.cjs",
+    "validate:registry": "node scripts/validate-registry.cjs",
+    "prepack": "npm run build:lib",
+    "prepare": "npm run build:lib",
+    "version": "node scripts/sync-manifest-versions.cjs --stage && node scripts/gen-capability-registry.cjs --write && git add gsd-core/bin/lib/capability-registry.cjs",
+    "prepublishOnly": "npm run build:lib && npm run build:hooks",
+    "pretest": "npm run build:lib && npm run lint:skill-deps",
+    "pretest:coverage": "npm run build:lib && npm run lint:skill-deps",
+    "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/",
+    "lint:fix": "eslint . --fix",
+    "lint:table-schema-drift": "node scripts/lint-table-schema-drift.cjs",
+    "lint:ci": "npm run lint && npm run lint:skill-deps && npm run lint:generated-sync && node scripts/lint-test-file-count.cjs && node scripts/lint-command-contract.cjs && node scripts/lint-pr-check-project-dir.cjs && npm run lint:legacy-name && node scripts/lint-regression-test-names.cjs && node scripts/lint-allow-test-rule-refs.cjs && node scripts/lint-resolution-provenance.cjs && node scripts/validate-registry.cjs && node scripts/lint-table-schema-drift.cjs",
+    "lint:allow-test-rule-refs": "node scripts/lint-allow-test-rule-refs.cjs",
+    "lint:regression-names": "node scripts/lint-regression-test-names.cjs",
     "lint:descriptions": "node scripts/lint-descriptions.cjs",
     "lint:skill-deps": "node scripts/lint-skill-deps.cjs",
-    "lint:tests": "node scripts/lint-no-source-grep.cjs",
     "lint:test-file-count": "node scripts/lint-test-file-count.cjs",
     "lint:pr-checks": "node scripts/lint-pr-check-project-dir.cjs",
     "lint:changeset": "node scripts/changeset/lint.cjs",
+    "lint:generated-sync": "node scripts/gen-capability-registry.cjs --check && node scripts/gen-loop-host-contract.cjs --check && node scripts/gen-capability-matrix.cjs --check && node scripts/sync-manifest-versions.cjs --check && node scripts/gen-inventory-manifest.cjs --check && node scripts/generate-package-identity.cjs --check && node scripts/gen-plugin-skills.cjs --check && node scripts/gen-registry.cjs --check",
     "lint:docs": "node scripts/lint-docs-required.cjs",
+    "lint:legacy-name": "node scripts/lint-legacy-dir-name.cjs",
+    "ci:test-scope": "node scripts/ci-test-scope.cjs",
+    "size:baseline": "node scripts/update-size-baseline.cjs",
     "changeset": "node scripts/changeset/new.cjs",
     "changelog:render": "node scripts/changeset/cli.cjs render",
     "test": "node scripts/run-tests.cjs",
@@ -92,8 +126,15 @@
     "test:install": "node scripts/run-tests.cjs --suite install",
     "test:security": "node scripts/run-tests.cjs --suite security",
     "test:slow": "node scripts/run-tests.cjs --suite slow",
-    "test:coverage": "c8 --check-coverage --lines 70 --reporter text --include 'get-shit-done/bin/lib/*.cjs' --exclude 'tests/**' --all node scripts/run-tests.cjs",
-    "test:coverage:unit": "c8 --check-coverage --lines 70 --reporter text --include 'get-shit-done/bin/lib/*.cjs' --exclude 'tests/**' --all node scripts/run-tests.cjs --suite unit",
-    "test:coverage:all": "npm run test:coverage"
+    "test:affected": "node scripts/run-affected-tests.cjs",
+    "test:coverage": "c8 --check-coverage --lines 70 --branches 60 --reporter text --include 'gsd-core/bin/lib/*.cjs' --exclude 'tests/**' --all node scripts/run-tests.cjs",
+    "test:coverage:scripts-floor": "c8 check-coverage --lines 55 --include 'scripts/**/*.cjs' --exclude 'tests/**' --all",
+    "test:coverage:unit": "c8 --check-coverage --lines 70 --branches 60 --reporter text --include 'gsd-core/bin/lib/*.cjs' --exclude 'tests/**' --all node scripts/run-tests.cjs --suite unit && c8 check-coverage --per-file --lines 0 --functions 0 --statements 0 --branches 70 --include 'gsd-core/bin/lib/state.cjs' --include 'gsd-core/bin/lib/phase.cjs' --include 'gsd-core/bin/lib/verify.cjs' --include 'gsd-core/bin/lib/init.cjs' --exclude 'tests/**'",
+    "test:coverage:all": "npm run test:coverage",
+    "test:mutation": "stryker run",
+    "test:mutation:since": "stryker run --incremental --since origin/next"
+  },
+  "allowScripts": {
+    "fallow@2.70.0": true
   }
 }

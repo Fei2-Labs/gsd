@@ -18,21 +18,24 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { cleanup } = require('./helpers.cjs');
 
 const ROOT = path.join(__dirname, '..');
 
 const {
   convertClaudeCommandToClaudeSkill,
   writeManifest,
-  install,
+} = require(path.join(ROOT, 'bin', 'install.js'));
+
+const {
   installRuntimeArtifacts,
   uninstallRuntimeArtifacts,
-} = require(path.join(ROOT, 'bin', 'install.js'));
+} = require(path.join(ROOT, 'gsd-core', 'bin', 'lib', 'install-engine.cjs'));
 
 const {
   loadSkillsManifest,
   resolveProfile,
-} = require(path.join(ROOT, 'get-shit-done', 'bin', 'lib', 'install-profiles.cjs'));
+} = require(path.join(ROOT, 'gsd-core', 'bin', 'lib', 'install-profiles.cjs'));
 
 // Shared resolved profile (full — installs all skills from srcDir)
 const _manifest = loadSkillsManifest();
@@ -201,7 +204,7 @@ describe('installRuntimeArtifacts (claude global) — skill layout', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup(tmpDir);
   });
 
   test('creates correct directory structure skills/gsd-xxx/SKILL.md', () => {
@@ -315,7 +318,7 @@ describe('installRuntimeArtifacts path replacement in Claude global skills (#165
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup(tmpDir);
   });
 
   test('replaces ~/.claude/ and $HOME/.claude/ paths with absolute configDir prefix on global install', () => {
@@ -331,8 +334,8 @@ describe('installRuntimeArtifacts path replacement in Claude global skills (#165
         '---',
         '',
         '<execution_context>',
-        '@~/.claude/get-shit-done/workflows/manager.md',
-        '@$HOME/.claude/get-shit-done/references/ui-brand.md',
+        '@~/.claude/gsd-core/workflows/manager.md',
+        '@$HOME/.claude/gsd-core/references/ui-brand.md',
         '</execution_context>',
       ].join('\n'),
     });
@@ -347,18 +350,18 @@ describe('installRuntimeArtifacts path replacement in Claude global skills (#165
     // Paths are rewritten to the absolute configDir prefix
     const expectedPrefix = path.resolve(configDir).replace(/\\/g, '/') + '/';
     assert.ok(
-      content.includes(expectedPrefix + 'get-shit-done/workflows/manager.md'),
+      content.includes(expectedPrefix + 'gsd-core/workflows/manager.md'),
       'tilde path rewritten to absolute configDir prefix'
     );
     assert.ok(
-      content.includes(expectedPrefix + 'get-shit-done/references/ui-brand.md'),
+      content.includes(expectedPrefix + 'gsd-core/references/ui-brand.md'),
       'HOME path rewritten to absolute configDir prefix'
     );
   });
 
   test('replaces $HOME/.claude/ paths with absolute configDir prefix on global install', () => {
     const { configDir } = setupConfigDir(tmpDir, {
-      'debug.md': '---\nname: gsd:debug\ndescription: Debug\n---\n\n@$HOME/.claude/get-shit-done/workflows/debug.md',
+      'debug.md': '---\nname: gsd:debug\ndescription: Debug\n---\n\n@$HOME/.claude/gsd-core/workflows/debug.md',
     });
 
     installRuntimeArtifacts('claude', configDir, 'global', resolvedProfileFull);
@@ -369,7 +372,7 @@ describe('installRuntimeArtifacts path replacement in Claude global skills (#165
     assert.ok(!content.includes('$HOME/.claude/'), 'no $HOME/.claude/ paths remain');
     const expectedPrefix = path.resolve(configDir).replace(/\\/g, '/') + '/';
     assert.ok(
-      content.includes(expectedPrefix + 'get-shit-done/workflows/debug.md'),
+      content.includes(expectedPrefix + 'gsd-core/workflows/debug.md'),
       'path rewritten to absolute configDir prefix'
     );
   });
@@ -378,7 +381,7 @@ describe('installRuntimeArtifacts path replacement in Claude global skills (#165
     // For global installs, computePathPrefix returns the absolute configDir path.
     // Both ~/.claude/ and $HOME/.claude/ are normalized to the same absolute prefix.
     const { configDir } = setupConfigDir(tmpDir, {
-      'next.md': '---\nname: gsd:next\ndescription: Next\n---\n\n@~/.claude/get-shit-done/workflows/next.md',
+      'next.md': '---\nname: gsd:next\ndescription: Next\n---\n\n@~/.claude/gsd-core/workflows/next.md',
     });
 
     installRuntimeArtifacts('claude', configDir, 'global', resolvedProfileFull);
@@ -388,7 +391,7 @@ describe('installRuntimeArtifacts path replacement in Claude global skills (#165
     );
     const expectedPrefix = path.resolve(configDir).replace(/\\/g, '/') + '/';
     assert.ok(
-      content.includes(expectedPrefix + 'get-shit-done/workflows/next.md'),
+      content.includes(expectedPrefix + 'gsd-core/workflows/next.md'),
       'global tilde path rewritten to absolute configDir prefix'
     );
     assert.ok(!content.includes('~/.claude/'), 'tilde form is replaced');
@@ -405,7 +408,7 @@ describe('Legacy commands/gsd/ cleanup', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup(tmpDir);
   });
 
   test('install removes legacy commands/gsd/ directory when present', () => {
@@ -440,7 +443,7 @@ describe('writeManifest tracks skills/ for Claude', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup(tmpDir);
   });
 
   test('manifest includes skills/gsd-xxx/SKILL.md entries for Claude runtime', () => {
@@ -450,8 +453,8 @@ describe('writeManifest tracks skills/ for Claude', () => {
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'skill content');
 
-    // Create get-shit-done directory (required by writeManifest)
-    const gsdDir = path.join(tmpDir, 'get-shit-done');
+    // Create gsd-core directory (required by writeManifest)
+    const gsdDir = path.join(tmpDir, 'gsd-core');
     fs.mkdirSync(gsdDir, { recursive: true });
     fs.writeFileSync(path.join(gsdDir, 'test.md'), 'test');
 

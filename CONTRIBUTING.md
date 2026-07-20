@@ -1,17 +1,34 @@
-# Contributing to GSD
+# Contributing to GSD Core
 
 ## Getting Started
 
 ```bash
 # Clone the repo
-git clone https://github.com/gsd-build/get-shit-done.git
-cd get-shit-done
+git clone https://github.com/open-gsd/gsd-core.git
+cd gsd-core
 
 # Install dependencies
 npm install
 
 # Run tests
 npm test
+```
+
+---
+
+## Bootstrap your environment
+
+For a step-by-step setup guide covering Node version managers, `npm ci`, the environment
+validator, daily commands, and troubleshooting, see:
+
+**[docs/contributing/bootstrap.md](docs/contributing/bootstrap.md)**
+
+Quick start:
+
+```bash
+nvm use           # activate the pinned Node version from .nvmrc
+npm run check:env # validate your environment
+npm ci            # install from lockfile
 ```
 
 ---
@@ -25,7 +42,7 @@ GSD accepts three types of contributions. Each type has a different process and 
 A fix corrects something that is broken, crashes, produces wrong output, or behaves contrary to documented behavior.
 
 **Process:**
-1. Open a [Bug Report issue](https://github.com/gsd-build/get-shit-done/issues/new?template=bug_report.yml) — fill it out completely.
+1. Open a [Bug Report issue](https://github.com/open-gsd/gsd-core/issues/new?template=bug_report.yml) — fill it out completely.
 2. Wait for a maintainer to confirm it is a bug (label: `confirmed-bug`). For obvious, reproducible bugs this is typically fast.
 3. Fix it. Write a test that would have caught the bug.
 4. Open a PR using the [Fix PR template](.github/PULL_REQUEST_TEMPLATE/fix.md) — link the confirmed issue.
@@ -41,7 +58,7 @@ An enhancement improves an existing feature — better output, faster execution,
 **The bar:** Enhancements must have a scoped written proposal approved by a maintainer before any code is written. A PR for an enhancement will be closed without review if the linked issue does not carry the `approved-enhancement` label.
 
 **Process:**
-1. Open an [Enhancement issue](https://github.com/gsd-build/get-shit-done/issues/new?template=enhancement.yml) with the full proposal.  The issue template requires: the problem being solved, the concrete benefit, the scope of changes, and alternatives considered.
+1. Open an [Enhancement issue](https://github.com/open-gsd/gsd-core/issues/new?template=enhancement.yml) with the full proposal.  The issue template requires: the problem being solved, the concrete benefit, the scope of changes, and alternatives considered.
 2. **Wait for maintainer approval.** A maintainer must label the issue `approved-enhancement` before you write a single line of code. Do not open a PR against an unapproved enhancement issue — it will be closed.
 3. Write the code. Keep the scope exactly as approved. If scope creep occurs, comment on the issue and get re-approval before continuing.
 4. Open a PR using the [Enhancement PR template](.github/PULL_REQUEST_TEMPLATE/enhancement.md) — link the approved issue.
@@ -57,8 +74,8 @@ A feature adds something new — a new command, a new workflow, a new concept, a
 **The bar:** Features require a complete written specification approved by a maintainer before any code is written. A PR for a feature will be closed without review if the linked issue does not carry the `approved-feature` label. Incomplete specs are closed, not revised by maintainers.
 
 **Process:**
-1. **Discuss first** — check [Discussions](https://github.com/gsd-build/get-shit-done/discussions) to see if the idea has been raised. If it has and was declined, don't open a new issue.
-2. Open a [Feature Request issue](https://github.com/gsd-build/get-shit-done/issues/new?template=feature_request.yml) with the complete spec. The template requires: the solo-developer problem being solved, what is being added, full scope of affected files and systems, user stories, acceptance criteria, and assessment of maintenance burden.
+1. **Discuss first** — check [Discussions](https://github.com/open-gsd/gsd-core/discussions) to see if the idea has been raised. If it has and was declined, don't open a new issue.
+2. Open a [Feature Request issue](https://github.com/open-gsd/gsd-core/issues/new?template=feature_request.yml) with the complete spec. The template requires: the solo-developer problem being solved, what is being added, full scope of affected files and systems, user stories, acceptance criteria, and assessment of maintenance burden.
 3. **Wait for maintainer approval.** A maintainer must label the issue `approved-feature` before you write a single line of code. Approval is not guaranteed — GSD is intentionally lean and many valid ideas are declined because they conflict with the project's design philosophy.
 4. Write the code. Implement exactly the approved spec. Changes to scope require re-approval.
 5. Open a PR using the [Feature PR template](.github/PULL_REQUEST_TEMPLATE/feature.md) — link the approved issue.
@@ -103,6 +120,46 @@ PRs that arrive without a properly-labeled linked issue are closed automatically
 
 ---
 
+## Where Do I Open My PR? (Branching Model)
+
+GSD uses two long-lived branches: `main` (production, what's on npm `@latest`)
+and `next` (integration for the upcoming release). **Almost every PR targets
+`next`.** Full guide: [`docs/branching.md`](docs/branching.md).
+
+| Your branch | PR target | Notes |
+|---|---|---|
+| `feat/NNN-slug` | `next` | Default for all new features |
+| `fix/NNN-slug` | `next` | Default for all bug fixes; ships in next minor or via hotfix cherry-pick |
+| `chore/`, `docs/`, `refactor/`, `test/`, `perf/`, `ci/`, `revert/` | `next` | All routine work |
+| `fix/critical-NNN-slug` | `main` | Production-down emergencies only; auto-back-merges to `next` |
+| `release/X.Y.0` | `main` | Created by `release.yml` — don't make these by hand |
+| `hotfix/X.Y.Z` | `main` | Created by `release.yml` (dispatch with a patch version X.Y.Z) — don't make these by hand |
+| Stabilization PR for an in-flight release | `release/X.Y.0` | Fix a regression found during the RC cycle |
+
+**Day-to-day commands:**
+
+```bash
+git fetch origin
+git checkout next
+git pull --ff-only origin next
+git checkout -b fix/3187-config-corruption
+# ... commit, push
+gh pr create --base next --repo open-gsd/gsd-core
+```
+
+If you target the wrong branch by accident, the `PR Target Validator`
+workflow will post a comment with the one-line fix (click "Edit" by the PR
+title and change the base branch — no need to recreate the PR).
+
+**Why this matters:** Under the old single-branch model, every PR required
+rebasing onto `main` because branch protection required "up-to-date before
+merging" and `main` moved on every merge. With `next` as the integration
+branch and that flag disabled on `next`, concurrent PRs can merge in any
+order as long as they don't conflict on the same lines. The rebase
+treadmill is gone for the 95% case.
+
+---
+
 ## Pull Request Guidelines
 
 ### Architecture & Domain Standards (Maintainer-Defined)
@@ -121,8 +178,6 @@ Contributor requirements (summary):
 - If a change intentionally revisits an ADR decision, call it out explicitly in the linked issue and PR rationale.
 - Do not rewrite maintainer intent in `CONTEXT.md`/ADRs as part of drive-by cleanup; propose focused updates tied to approved scope.
 - If using an AI assistant, prompt it to read `CONTEXT.md` and the relevant ADRs before writing any code or docs, and verify it used the correct vocabulary before opening the PR.
-
-**CJS↔SDK seam.** When working on `bin/lib/*.cjs` or `sdk/src/**`, read [`docs/agents/cjs-sdk-seam.md`](docs/agents/cjs-sdk-seam.md). It documents the canonical pattern for Shared Modules (data manifest + source-of-truth file + generator + freshness check + Adapters) and the hand-sync pair lint that blocks new drift. New `<name>.cjs` ↔ `<name>.ts` pairs require either migration to a Shared Module or an explicit allowlist entry with justification in `scripts/shared-module-handsync-allowlist.json`. Adding an allowlist entry requires maintainer review via CODEOWNERS.
 
 **Every PR must link to an approved issue.** PRs without a linked issue are closed without review, no exceptions.
 
@@ -146,15 +201,63 @@ npm run changeset -- --type Fixed --pr <YOUR_PR_NUMBER> \
 
 This writes `.changeset/<adjective>-<noun>-<noun>.md`. Three random words → concurrent PRs never collide. Allowed `type:` values follow [Keep a Changelog](https://keepachangelog.com/): `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
-Fragments are consolidated into `CHANGELOG.md` at release time by the release workflow. See [`.changeset/README.md`](.changeset/README.md) for the format spec and [#2975](https://github.com/gsd-build/get-shit-done/issues/2975) for the rationale.
+Fragments are consolidated into `CHANGELOG.md` at release time by the release workflow. See [`.changeset/README.md`](.changeset/README.md) for the format spec and [#2975](https://github.com/open-gsd/gsd-core/issues/2975) for the rationale.
 
-**CI enforcement:** the `Changeset Required` workflow (`scripts/changeset/lint.cjs`) fails any PR that touches `bin/`, `get-shit-done/`, `agents/`, `commands/`, `hooks/`, or `sdk/src/` without a `.changeset/*.md` fragment.
+**CI enforcement:** the `Changeset Required` workflow (`scripts/changeset/lint.cjs`) fails any PR that touches `bin/`, `gsd-core/`, `agents/`, `commands/`, `hooks/`, or `sdk/src/` without a `.changeset/*.md` fragment. The gate also **validates the content** of every changed fragment: a fragment whose frontmatter does not parse (e.g. a `pr: 0` placeholder that was never backfilled to the real PR number) fails the gate with `fail_invalid_fragment`, naming the offending file. This stops a malformed fragment from merging to `next` and only detonating later in the release job's CHANGELOG render.
 
 **Opt-out:** PRs with no user-facing impact (test refactors, lint config changes, CI tweaks, formatting-only changes) can add the `no-changelog` label. The lint honors it. When unsure whether a change is user-facing, **add the fragment**.
 
+### Release notes formatting
+
+GitHub release notes are generated automatically. The release and hotfix
+workflows first create the release with `gh release create --generate-notes`,
+then run `scripts/release-notes/format-github-release-notes.cjs --apply` to
+rewrite the body into the project's curated format: an **Install** block,
+followed by **What's Changed** grouped into **Feature** / **Enhancement** /
+**Fix** sections (classified by each PR's conventional-commit title prefix —
+`feat` → Feature, `fix` → Fix, everything else → Enhancement), then
+**New Contributors** and the **Full Changelog** link.
+
+To re-format an existing release by hand (e.g. backfilling an older release):
+
+```bash
+node scripts/release-notes/format-github-release-notes.cjs \
+  --tag vX.Y.Z --repo open-gsd/gsd-core --apply
+```
+
+Omit `--apply` to print the reformatted body to stdout for review without
+publishing.
+
+### PR title convention (enforced at open time)
+
+Because the changelog is built from PR titles, your **PR title** must follow:
+
+```
+type(#<issue>): short summary
+```
+
+- **Start with the type** — `feat`, `fix`, or any other conventional type
+  (`chore`, `docs`, `refactor`, …). No leading tags or prefixes: a title like
+  `[security] fix(config): …` defeats the `^fix` bucket anchor and silently
+  files the entry under the wrong changelog section.
+- **Put the linked issue ref in the scope** — `(#<digits>)`. This is what
+  renders as a link to the issue in the changelog line. `fix(core): …` buckets
+  correctly but produces a changelog entry with **no issue link**.
+- A breaking-change marker is fine: `feat(#42)!: …`.
+
+Examples: `fix(#1542): roadmap rollback`, `feat(#39): milestone-prefixed phase IDs`,
+`enhance(#1549): add PR-title validator`.
+
+**CI enforcement:** `pr-title-validator.yml` checks the title on open/edit and
+fails with the required format if it doesn't conform. It reuses the same matcher
+the changelog classifier uses (`scripts/release-notes/conventional-title.cjs`), so a title
+that passes the check is guaranteed to bucket and link correctly. Fix a flagged
+title by editing it in place — the check re-runs on edit, no need to recreate
+the PR.
+
 ## Documentation Updates — Update the Relevant Docs
 
-If your PR adds, changes, deprecates, or removes user-visible behavior, you **must** update the relevant documentation in `docs/`. CI will fail any PR whose changeset fragment is typed `Added`, `Changed`, `Deprecated`, or `Removed` without also modifying at least one file under `docs/` ([#3213](https://github.com/gsd-build/get-shit-done/issues/3213)).
+If your PR adds, changes, deprecates, or removes user-visible behavior, you **must** update the relevant documentation in `docs/`. CI will fail any PR whose changeset fragment is typed `Added`, `Changed`, `Deprecated`, or `Removed` without also modifying at least one file under `docs/` ([#3213](https://github.com/open-gsd/gsd-core/issues/3213)).
 
 `Fixed` and `Security` fragments do not trigger this lint — bug fixes restore documented behavior, they do not introduce new behavior to document. (Edit the docs anyway if a fix corrects something the docs got wrong.)
 
@@ -458,7 +561,7 @@ Generator tests should run in temp fixtures and assert atomic output behavior. D
 ```javascript
 // BAD — source-grep theater
 const configSrc = fs.readFileSync(
-  path.join(GSD_ROOT, 'bin', 'lib', 'config-schema.cjs'), 'utf-8'
+  path.join(GSD_ROOT, 'gsd-core', 'bin', 'lib', 'config-schema.cjs'), 'utf-8'
 );
 assert.ok(
   configSrc.includes("'workflow.plan_bounce'"),
@@ -489,7 +592,7 @@ This single test covers key registration in `VALID_CONFIG_KEYS`, the key's names
 
 **Why this pattern broke at scale:** Commit `990c3e64` in this repo updated 5 source-grep tests in one pass when `VALID_CONFIG_KEYS` moved between files. Zero of those tests were testing behavior. If they had been behavioral tests, the migration would have been invisible.
 
-**CI enforcement:** A linter (`scripts/lint-no-source-grep.cjs`, run as `npm run lint:tests`) detects violations. Any test file that calls `readFileSync` on a `.cjs` path in a source directory without the exemption annotation below will fail the `lint-tests` CI job.
+**CI enforcement:** The `local/no-source-grep` ESLint rule (`eslint-rules/no-source-grep.cjs`, wired in `eslint.config.mjs`) detects violations. Any test file that calls `readFileSync` on a `.cjs` path in a source directory without the exemption annotation below is flagged by `npx eslint .` (the `Lint — ESLint` CI step).
 
 ### Exception: `allow-test-rule: <reason>`
 
@@ -560,11 +663,9 @@ Concretely: for any system-under-test that produces text output (a file renderer
 | Error / status / reason | A frozen enum (`Object.freeze({ FAIL_X: 'fail_x', ... })`) | `assert.equal(result.reason, REASON.FAIL_X)` |
 | File presence after a write | `fs.statSync().isFile()`, `.size > 0`, `.mtimeMs` advances | Filesystem facts; never read the file content back |
 
-#### Concrete examples from this repo
+#### Concrete example from this repo
 
-`buildWindowsShimTriple(shimSrc)` in `bin/install.js` is the canonical IR pattern: pure function, no I/O, returns `{ invocation, eol, fileNames, render }`. `trySelfLinkGsdSdkWindows` calls it and writes `triple.render[kind]()` to disk. Tests assert on `triple.invocation.target`, `triple.eol.cmd`, `Object.keys(triple).sort()` — never on the rendered text. Filesystem-level tests assert `fs.statSync(target).size === Buffer.byteLength(triple.render.cmd())` to prove the writer writes what the renderer produces, **without comparing content**.
-
-`scripts/verify-reapply-patches.cjs` exposes a frozen `REASON` enum and emits it through `--json`. Tests assert `report.results[0].reason === REASON.FAIL_USER_LINES_MISSING`. The human formatter exists for operator console output only — tests must not depend on its prose. Adding a new reason code requires updating the `REASON` enum, the `--json` output, AND the test that locks `Object.keys(REASON).sort()` — three coordinated changes that prevent the code surface from drifting from the test surface.
+`gsd-core/bin/verify-reapply-patches.cjs` exposes a frozen `REASON` enum and emits it through `--json`. Tests assert `report.results[0].reason === REASON.FAIL_USER_LINES_MISSING` rather than regex-matching the human-readable prose. The human formatter exists for operator console output only — tests must not depend on it. Adding a new reason code requires updating the `REASON` enum, the `--json` output, AND the test that locks `Object.keys(REASON).sort()` — three coordinated changes that keep the code surface from drifting from the test surface. A pure builder that returns the IR (no I/O) and a writer that consumes it — `fs.statSync(target).size === Buffer.byteLength(render())` to prove the writer writes what the renderer produces, **without comparing content** — is the same pattern applied to rendered files.
 
 #### Hiding grep behind a function is still grep
 
@@ -579,7 +680,7 @@ There are exactly two cases where text content is the legitimate object of a tes
 
 For everything else, if a test reaches for `.includes()` / `.startsWith()` / `assert.match(text, /…/)`, the production code is missing a typed surface. **Add the typed surface; do not work around it.**
 
-**CI enforcement:** `scripts/lint-no-source-grep.cjs` is being extended (see issue tracker for the latest scope) to flag `String#includes`/`String#startsWith`/`String#endsWith`/`assert.match` on `readFileSync` results and on `cp.spawnSync` stdout/stderr in test files, with the same `// allow-test-rule:` exemption mechanism.
+**CI enforcement:** the `local/no-source-grep` ESLint rule (`eslint-rules/no-source-grep.cjs`) is being extended (see issue tracker for the latest scope) to flag `String#includes`/`String#startsWith`/`String#endsWith`/`assert.match` on `readFileSync` results and on `cp.spawnSync` stdout/stderr in test files, with the same `// allow-test-rule:` exemption mechanism.
 
 ### Node.js Version Compatibility
 
@@ -631,7 +732,16 @@ node --test tests/core.test.cjs
 npm run test:coverage
 ```
 
-For examples of required negative matrices, parser fixtures, filesystem fault injection, security abuse tests, generated-file checks, and runtime/SDK parity tests, see [`TEST-EXAMPLES.md`](TEST-EXAMPLES.md).
+For examples of required negative matrices, parser fixtures, filesystem fault injection, security abuse tests, generated-file checks, and runtime/SDK parity tests, see [`TEST-EXAMPLES.md`](./TEST-EXAMPLES.md).
+
+### Preferred local benchmark runner (before PR)
+
+When you can, run the local test bench harness before opening a PR — especially for Windows-sensitive changes.
+
+- Setup guide: [gsd-test-runner getting started](https://github.com/open-gsd/gsd-test-runner/blob/main/docs/getting-started.md)
+- Preferred PR evidence: include the bench results summary (or artifact link) in your PR body.
+
+This gives maintainers a faster, higher-confidence signal than CI-only validation.
 
 ### Pre-PR Seam Checks (Manifest/Alias Routing)
 
@@ -652,7 +762,7 @@ cat > .githooks/pre-commit <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-if git diff --cached --name-only | grep -Eq "^sdk/src/query/command-manifest\.|^sdk/src/query/command-aliases\.generated\.ts$|^get-shit-done/bin/lib/command-aliases\.generated\.cjs$|^sdk/scripts/gen-command-aliases\.ts$"; then
+if git diff --cached --name-only | grep -Eq "^sdk/src/query/command-manifest\.|^sdk/src/query/command-aliases\.generated\.ts$|^gsd-core/bin/lib/command-aliases\.generated\.cjs$|^sdk/scripts/gen-command-aliases\.ts$"; then
   npm run check:alias-drift
 fi
 EOF
@@ -706,11 +816,10 @@ The following checks run on every PR in addition to the test suite:
 
 | Job | What it checks | How to pass |
 |-----|----------------|-------------|
-| `lint-tests` | No source-grep tests (see above) | Replace with `runGsdTools()` behavioral tests, or add `// allow-test-rule: <reason>` |
+| `Lint — ESLint` | No source-grep tests (see above), via the `local/no-source-grep` rule | Replace with `runGsdTools()` behavioral tests, or add `// allow-test-rule: <reason>` |
+| `Lint — cross-platform portability` | Windows-portability defects in tests, via `local/no-path-literal-in-assert` (more rules land per [ADR-1703](docs/adr/1703-portability-enforcement-architecture.md)) — e.g. a path-returning call asserted against a hardcoded `/`-literal | Normalize the actual: `String(pathFn(...)).replace(/\\/g, '/')`, or structure platform-specific code behind a `process.platform !== 'win32'` guard. **No `eslint-disable`** — see [cross-platform-portability-rules.md](docs/contributing/cross-platform-portability-rules.md) |
 
-Run locally before pushing: `npm run lint:tests`
-
-### Test Requirements by Contribution Type
+Run locally before pushing: `npm run lint` (or `npx eslint .`)
 
 ### Architecture-Aware Testing Requirements
 
@@ -719,6 +828,8 @@ When work touches architecture, routing, policy, registry assembly, or command s
 - Prefer invariant/contract tests that protect ADR-backed behavior and `CONTEXT.md` terminology.
 - Ensure tests validate canonical behavior through the defined seam (for example: structured result contracts, canonical command metadata, and adapter parity), not source-text coupling.
 - If ADRs define expected behavior, tests should assert those expectations directly.
+
+### Test Requirements by Contribution Type
 
 The required tests differ depending on what you are contributing:
 
@@ -741,28 +852,42 @@ Reviewers do not rely solely on CI to verify correctness. Before approving a PR,
 
 **"Tests pass in CI" is not sufficient for merge.** The implementation must correctly solve the problem described in the linked issue.
 
+## Code Review Lessons
+
+### Input validation: check shape, not just type
+
+Defensive normalization at trust boundaries must validate both the value's type and its semantic shape. A `typeof === 'string'` check is necessary but insufficient when the field's contract requires a specific format (UUID v4, semver, file path, etc.). See [ADR 227](docs/adr/227-input-validation-shape-not-just-type.md) for the architectural standard and concrete cases.
+
 ## Code Style
 
 - **CommonJS** (`.cjs`) — the project uses `require()`, not ESM `import`
 - **No external dependencies in core** — `gsd-tools.cjs` and all lib files use only Node.js built-ins
-- **Conventional commits** — `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`
+- **Conventional commits** — `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`. The full grammar is `<type>(<scope>): <subject>` (enforced by `hooks/gsd-validate-commit.sh`; subject ≤72 chars, lowercase, imperative mood, no trailing period). When the work resolves a tracked issue, put the issue number in the scope: `fix(#1520): randomize mktemp temp paths on BSD/macOS`. The same convention applies to PR titles — release notes are grouped by the title's type prefix (`feat` → Feature, `fix` → Fix, everything else → Enhancement).
 
 ## File Structure
 
 ```
 bin/install.js          — Installer (multi-runtime)
-get-shit-done/
+gsd-core/
   bin/lib/              — Core library modules (.cjs)
   workflows/            — Workflow definitions (.md)
                           Large workflows split per progressive-disclosure
                           pattern: workflows/<name>/modes/*.md +
                           workflows/<name>/templates/*. Parent dispatches
                           to mode files. See workflows/discuss-phase/ as
-                          the canonical example (#2551). New modes for
+                          the canonical example (the discuss-phase/modes split, #717). New modes for
                           discuss-phase land in
                           workflows/discuss-phase/modes/<mode>.md.
-                          Per-file budgets enforced by
-                          tests/workflow-size-budget.test.cjs.
+                          Per-file sizes are pinned by a committed baseline
+                          (tests/workflow-size-baseline.json) plus loose tier
+                          hard caps, both in tests/workflow-size-budget.test.cjs.
+                          If you legitimately grow or shrink a workflow file,
+                          run `npm run size:baseline` to update the snapshot and
+                          justify any growth in your PR (or extract content
+                          lazily). The same guard covers agent files
+                          (agents/gsd-*.md). Full how-to + reference in
+                          docs/TESTING-SUITES.md (Workflow & agent size
+                          budget); see issue #1074.
   references/           — Reference documentation (.md)
   templates/            — File templates
 agents/                 — Agent definitions (.md) — CANONICAL SOURCE

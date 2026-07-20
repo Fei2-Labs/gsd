@@ -1,0 +1,85 @@
+{
+  "id": "codex",
+  "role": "runtime",
+  "version": "1.7.0",
+  "title": "OpenAI Codex CLI",
+  "description": "OpenAI Codex CLI — shell-var command style; per-agent sandbox tiers; config.toml + hooks.json hook surface; tier-1 support.",
+  "tier": "core",
+  "requires": [],
+  "engines": {
+    "gsd": ">=1.6.0"
+  },
+  "runtime": {
+    "configHome": {
+      "kind": "dot-home",
+      "name": ".codex",
+      "env": [
+        "CODEX_HOME"
+      ]
+    },
+    "localConfigDir": ".codex",
+    "configFormat": "toml",
+    "artifactLayout": {
+      "global": [
+        {
+          "kind": "skills",
+          "destSubpath": "skills",
+          "prefix": "gsd-",
+          "nesting": "flat",
+          "recursive": false,
+          "converter": "convertClaudeCommandToCodexSkill",
+          "home": ".agents"
+        }
+      ],
+      "local": [
+        {
+          "kind": "skills",
+          "destSubpath": "skills",
+          "prefix": "gsd-",
+          "nesting": "flat",
+          "recursive": false,
+          "converter": "convertClaudeCommandToCodexSkill",
+          "home": ".agents"
+        }
+      ]
+    },
+    "commandStyle": "shell-var",
+    "hooksSurface": "codex-hooks-json",
+    "hookEvents": "claude",
+    "sandboxTier": "codex-agent-sandbox",
+    "supportTier": 1,
+    "installSurface": "codex-toml",
+    "writesSharedSettings": false,
+    "permissionWriter": null,
+    "extendedHookEvents": [
+      "SubagentStop",
+      "Stop",
+      "PreCompact"
+    ],
+    "hostIntegration": {
+      "embeddingMode": "declarative",
+      "commandSurface": "slash-file",
+      "dispatch": {
+        "namedDispatch": true,
+        "nested": true,
+        "maxDepth": 1,
+        "background": true,
+        "subagentToolkit": "full",
+        "backgroundDispatch": true
+      },
+      "modelMode": "passive",
+      "hookBus": "host",
+      "stateIO": "filesystem",
+      "transport": "mcp",
+      "runtime": "node"
+    },
+    "hostBehaviors": {
+      "reapplyCommand": "$gsd-update --reapply",
+      "tomlConfigInstall": true,
+      "cleanupSkillSidecars": true,
+      "agentTomlFiles": true,
+      "frontmatterDialect": "codex",
+      "reviewerCli": true
+    }
+  }
+}

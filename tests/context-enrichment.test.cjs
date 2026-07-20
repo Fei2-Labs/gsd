@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * GSD Tools Tests - Adaptive Context Enrichment for 1M Models
@@ -22,7 +22,7 @@ const path = require('path');
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('execute-phase.md context enrichment', () => {
-  const EXECUTE_WORKFLOW_PATH = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'execute-phase.md');
+  const EXECUTE_WORKFLOW_PATH = path.join(__dirname, '..', 'gsd-core', 'workflows', 'execute-phase.md');
 
   test('contains CONTEXT_WINDOW config-get command', () => {
     const content = fs.readFileSync(EXECUTE_WORKFLOW_PATH, 'utf-8');
@@ -105,7 +105,7 @@ describe('execute-phase.md context enrichment', () => {
 });
 
 describe('plan-phase.md context enrichment', () => {
-  const PLAN_WORKFLOW_PATH = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'plan-phase.md');
+  const PLAN_WORKFLOW_PATH = path.join(__dirname, '..', 'gsd-core', 'workflows', 'plan-phase.md');
 
   test('contains CONTEXT_WINDOW conditional for prior CONTEXT.md', () => {
     const content = fs.readFileSync(PLAN_WORKFLOW_PATH, 'utf-8');

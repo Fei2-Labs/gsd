@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * Import Command Tests — import-command.test.cjs
@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CMD_PATH = path.join(__dirname, '..', 'commands', 'gsd', 'import.md');
-const WF_PATH = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'import.md');
+const WF_PATH = path.join(__dirname, '..', 'gsd-core', 'workflows', 'import.md');
 
 // ─── File Existence ────────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ describe('import command file structure', () => {
   });
 
   test('workflow file exists', () => {
-    assert.ok(fs.existsSync(WF_PATH), 'get-shit-done/workflows/import.md should exist');
+    assert.ok(fs.existsSync(WF_PATH), 'gsd-core/workflows/import.md should exist');
   });
 });
 
@@ -54,8 +54,8 @@ describe('import command references', () => {
 
   test('references the import workflow', () => {
     assert.ok(
-      content.includes('@~/.claude/get-shit-done/workflows/import.md'),
-      'command should reference the workflow via @~/.claude/get-shit-done/workflows/import.md'
+      content.includes('@~/.claude/gsd-core/workflows/import.md'),
+      'command should reference the workflow via @~/.claude/gsd-core/workflows/import.md'
     );
   });
 });

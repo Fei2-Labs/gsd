@@ -36,8 +36,12 @@ Parse the first token of $ARGUMENTS:
 
 ## list / status
 
-Call `listSurface(runtimeConfigDir, manifest, CLUSTERS)` from
-`get-shit-done/bin/lib/surface.cjs`. Display:
+Load the capability registry and call `listSurface(runtimeConfigDir, manifest, CLUSTERS, registry)` from
+the engine module at `${runtimeConfigDir}/gsd-core/bin/lib/surface.cjs`. The registry is loaded via:
+```js
+const registry = require(runtimeConfigDir + '/gsd-core/bin/lib/capability-registry.cjs');
+```
+Display:
 
 ```
 Enabled (N skills, ~T tokens):
@@ -67,8 +71,9 @@ Install profile: standard  (from .gsd-profile)
 3. `writeSurface(runtimeConfigDir, surfaceState)`.
 4. Resolve and re-apply:
    ```js
+   const registry = require(runtimeConfigDir + '/gsd-core/bin/lib/capability-registry.cjs');
    const layout = resolveRuntimeArtifactLayout(runtime, runtimeConfigDir, scope);
-   applySurface(runtimeConfigDir, layout, manifest, CLUSTERS);
+   applySurface(runtimeConfigDir, layout, manifest, CLUSTERS, registry);
    ```
 5. Confirm: "Surface updated to profile `<name>`. N skills enabled."
 
@@ -84,8 +89,9 @@ Valid cluster names: `core_loop`, `audit_review`, `milestone`, `research_ideate`
 3. Add cluster to `surfaceState.disabledClusters` (deduplicate).
 4. `writeSurface` → resolve layout → `applySurface`:
    ```js
+   const registry = require(runtimeConfigDir + '/gsd-core/bin/lib/capability-registry.cjs');
    const layout = resolveRuntimeArtifactLayout(runtime, runtimeConfigDir, scope);
-   applySurface(runtimeConfigDir, layout, manifest, CLUSTERS);
+   applySurface(runtimeConfigDir, layout, manifest, CLUSTERS, registry);
    ```
 5. Confirm: "Disabled cluster `<cluster>`. N skills removed from surface."
 
@@ -97,8 +103,9 @@ Valid cluster names: `core_loop`, `audit_review`, `milestone`, `research_ideate`
 2. Remove cluster from `surfaceState.disabledClusters`.
 3. `writeSurface` → resolve layout → `applySurface`:
    ```js
+   const registry = require(runtimeConfigDir + '/gsd-core/bin/lib/capability-registry.cjs');
    const layout = resolveRuntimeArtifactLayout(runtime, runtimeConfigDir, scope);
-   applySurface(runtimeConfigDir, layout, manifest, CLUSTERS);
+   applySurface(runtimeConfigDir, layout, manifest, CLUSTERS, registry);
    ```
 4. Confirm: "Enabled cluster `<cluster>`. N skills added back to surface."
 
@@ -144,12 +151,12 @@ All paths can be overridden by reading the `CLAUDE_CONFIG_DIR` env var if set.
 
 - Unknown cluster name → list valid cluster names, exit without writing.
 - Unknown profile name → list known profiles (`core`, `standard`, `full`), exit.
-- Missing `surface.cjs` → prompt: "Run `npm i -g get-shit-done` to reinstall GSD."
+- Missing `surface.cjs` → prompt: "Run `npm i -g @opengsd/gsd-core` to reinstall GSD."
 
 <execution_context>
 Surface state file: `~/.claude/.gsd-surface.json`
 Install profile marker: `~/.claude/.gsd-profile`
 Skill dirs: `~/.claude/skills/gsd-*/`
-Engine module: `~/.claude/get-shit-done/bin/lib/surface.cjs`
-Cluster definitions: `~/.claude/get-shit-done/bin/lib/clusters.cjs`
+Engine module: `~/.claude/gsd-core/bin/lib/surface.cjs`
+Cluster definitions: `~/.claude/gsd-core/bin/lib/clusters.cjs`
 </execution_context>

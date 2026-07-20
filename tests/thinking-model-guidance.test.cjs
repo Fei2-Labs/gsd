@@ -14,13 +14,13 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const REFERENCES_DIR = path.join(__dirname, '..', 'get-shit-done', 'references');
+const REFERENCES_DIR = path.join(__dirname, '..', 'gsd-core', 'references');
 const AGENTS_DIR = path.join(__dirname, '..', 'agents');
 
 const THINKING_CONTEXTS = ['debug', 'execution', 'planning', 'research', 'verification'];
 
 // Sections present in #1791-style content (named models with anti-patterns, not generic schema)
-const REQUIRED_SECTIONS = [
+const _REQUIRED_SECTIONS = [
   '## Conflict Resolution',
   '## When NOT to Think',
 ];
@@ -40,7 +40,7 @@ const NAMED_MODELS = {
 };
 
 // Sequencing rules are documented in Conflict Resolution sections
-const SEQUENCING_CONTEXTS = ['debug', 'execution', 'planning', 'research', 'verification'];
+const _SEQUENCING_CONTEXTS = ['debug', 'execution', 'planning', 'research', 'verification'];
 
 // Gap Closure Mode is only in planning
 const GAP_CLOSURE_CONTEXT = 'planning';

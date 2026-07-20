@@ -17,6 +17,7 @@ const LINT_REASON = Object.freeze({
   OK_OPT_OUT_LABEL: 'ok_opt_out_label',
   OK_NO_USER_FACING_CHANGES: 'ok_no_user_facing_changes',
   FAIL_MISSING_FRAGMENT: 'fail_missing_fragment',
+  FAIL_INVALID_FRAGMENT: 'fail_invalid_fragment',
 });
 
 const OPT_OUT_LABEL = 'no-changelog';
@@ -25,7 +26,7 @@ const OPT_OUT_LABEL = 'no-changelog';
 // fragment or an explicit opt-out label. Test/CI/docs/lock files do not.
 const USER_FACING_PREFIXES = [
   'bin/',
-  'get-shit-done/',
+  'gsd-core/',
   'agents/',
   'commands/',
   'hooks/',
@@ -47,7 +48,10 @@ function isFragment(file) {
   return /^\.changeset\/[^/]+\.md$/.test(file) && !file.endsWith('/README.md');
 }
 
-function evaluateLint({ changedFiles, labels }) {
+function evaluateLint({ changedFiles, labels, fragmentFailures = [] }) {
+  if (fragmentFailures.length > 0) {
+    return { ok: false, reason: LINT_REASON.FAIL_INVALID_FRAGMENT, failures: fragmentFailures };
+  }
   if (changedFiles.some(isFragment)) {
     return { ok: true, reason: LINT_REASON.OK_FRAGMENT_PRESENT };
   }
@@ -59,6 +63,9 @@ function evaluateLint({ changedFiles, labels }) {
   }
   return { ok: false, reason: LINT_REASON.FAIL_MISSING_FRAGMENT };
 }
+
+const { ExitError, runMain } = require('../lib/cli-exit.cjs');
+const { parseFragment } = require('./parse.cjs');
 
 function main() {
   const fs = require('node:fs');
@@ -87,24 +94,54 @@ function main() {
     );
     changedFiles = out.split('\n').filter(Boolean);
   } catch (e) {
-    process.stderr.write(`could not compute diff: ${e.message}\n`);
-    process.exit(2);
+    throw new ExitError(2, `could not compute diff: ${e.message}`);
   }
 
-  const verdict = evaluateLint({ changedFiles, labels });
+  // Validate the content of every changed fragment file.
+  const fragmentFailures = [];
+  for (const file of changedFiles) {
+    if (!isFragment(file)) continue;
+    // A fragment path in the diff that no longer exists on disk was deleted in
+    // this PR — a deletion can't be malformed, so skip it.
+    if (!fs.existsSync(file)) continue;
+    let src;
+    try {
+      src = fs.readFileSync(file, 'utf8');
+    } catch (e) {
+      // Present in the diff but unreadable (broken symlink, permissions). A
+      // changed fragment we cannot read is suspect — fail closed rather than
+      // letting it slip through to the release-time CHANGELOG render.
+      fragmentFailures.push({ file, reason: 'unreadable', detail: e.code || 'read_error' });
+      continue;
+    }
+    const result = parseFragment(src);
+    if (!result.ok) {
+      fragmentFailures.push({ file, reason: result.reason, detail: result.detail });
+    }
+  }
+
+  const verdict = evaluateLint({ changedFiles, labels, fragmentFailures });
   if (process.argv.includes('--json')) {
     process.stdout.write(JSON.stringify({ ...verdict, changedFiles, labels }, null, 2) + '\n');
   } else if (verdict.ok) {
     process.stdout.write(`ok changeset-lint: ${verdict.reason}\n`);
+  } else if (verdict.reason === LINT_REASON.FAIL_INVALID_FRAGMENT) {
+    process.stderr.write(`\nERROR changeset-lint: ${verdict.reason}\n`);
+    process.stderr.write(`The following .changeset fragment(s) failed content validation:\n`);
+    for (const f of verdict.failures) {
+      const detail = f.detail !== undefined ? ` (${f.detail})` : '';
+      process.stderr.write(`  ${f.file}: ${f.reason}${detail}\n`);
+    }
+    process.stderr.write(`Fix the fragment(s) above before merging.\n`);
   } else {
     process.stderr.write(`\nERROR changeset-lint: ${verdict.reason}\n`);
     process.stderr.write(`PR touches user-facing files but does not include a .changeset/*.md fragment.\n`);
     process.stderr.write(`Run \`npm run changeset\` to create one, or add the \`${OPT_OUT_LABEL}\` label\n`);
     process.stderr.write(`if this PR genuinely has no user-facing impact (test refactor, CI tweak, etc.).\n`);
   }
-  process.exit(verdict.ok ? 0 : 1);
+  return verdict.ok ? 0 : 1;
 }
 
-if (require.main === module) main();
+if (require.main === module) runMain(main);
 
 module.exports = { evaluateLint, LINT_REASON, OPT_OUT_LABEL, isUserFacing, isFragment };

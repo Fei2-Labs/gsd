@@ -44,7 +44,7 @@ function collectSourceFiles(dir) {
 }
 
 // Scan source dirs only — exclude tests/ which may contain intentional fixtures
-const sourceDirs = ['bin', 'scripts', 'hooks', path.join('get-shit-done', 'bin')].map(
+const sourceDirs = ['bin', 'scripts', 'hooks', path.join('gsd-core', 'bin')].map(
   d => path.join(repoRoot, d)
 );
 const sourceFiles = sourceDirs.flatMap(collectSourceFiles);
@@ -55,11 +55,11 @@ const sourceFiles = sourceDirs.flatMap(collectSourceFiles);
  * Scan files for a pattern, skipping comment lines.
  * Returns an array of human-readable failure strings.
  */
-function scanFiles(files, pattern, description) {
+function scanFiles(files, pattern, _description) {
   const failures = [];
   for (const file of files) {
     const content = fs.readFileSync(file, 'utf8');
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const trimmed = line.trimStart();
@@ -105,7 +105,7 @@ describe('no hardcoded /home/ absolute paths', () => {
   test('no /home/<username>/ paths in string literals', () => {
     // Requires: quote + /home/ + non-slash chars (the username) + /
     // This avoids matching things like regex patterns /^home/
-    const homePath = /['"`]\/home\/[^/\s'"` \n]+\//;
+    const homePath = /['"`]\/home\/[^/\s'"` \r\n]+\//;
     const failures = scanFiles(sourceFiles, homePath);
     assert.deepStrictEqual(
       failures, [],
@@ -122,7 +122,7 @@ describe('no hardcoded /home/ absolute paths', () => {
 describe('no hardcoded /Users/ absolute paths', () => {
   test('no /Users/<username>/ paths in string literals', () => {
     // Requires: quote + /Users/ + username chars + /
-    const usersPath = /['"`]\/Users\/[^/\s'"` \n]+\//;
+    const usersPath = /['"`]\/Users\/[^/\s'"` \r\n]+\//;
     const failures = scanFiles(sourceFiles, usersPath);
     assert.deepStrictEqual(
       failures, [],

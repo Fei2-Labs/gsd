@@ -1,9 +1,9 @@
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 'use strict';
 
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
 
 /**
  * Next Up /clear Order Tests (#1623)
@@ -17,9 +17,8 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const glob = require('path');
 
-const GSD_ROOT = path.join(__dirname, '..', 'get-shit-done');
+const GSD_ROOT = path.join(__dirname, '..', 'gsd-core');
 const UI_BRAND = path.join(GSD_ROOT, 'references', 'ui-brand.md');
 const CONTINUATION_FORMAT = path.join(GSD_ROOT, 'references', 'continuation-format.md');
 const WORKFLOWS_DIR = path.join(GSD_ROOT, 'workflows');
@@ -167,3 +166,41 @@ describe('reference files — no <sub>/clear patterns', () => {
     );
   });
 });
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Folded from tests/bug-3083-resume-route-clear.test.cjs — consolidation epic #1969 (B4 #1973)
+// ────────────────────────────────────────────────────────────────────────
+{
+  const { describe: __foldDescribe } = require('node:test');
+  __foldDescribe("folded:bug-3083-resume-route-clear (consolidation epic #1969 B4 #1973)", () => {
+'use strict';
+
+const { test, describe } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+describe('bug #3083: resume-project next-step routing should not include /clear then:', () => {
+  test('route_to_workflow block omits /clear then: in resume templates', () => {
+    const workflowPath = path.join(__dirname, '..', 'gsd-core', 'workflows', 'resume-project.md');
+    const content = fs.readFileSync(workflowPath, 'utf-8');
+    const routeStart = content.indexOf('<step name="route_to_workflow">');
+    const routeEnd = content.indexOf('</step>', routeStart);
+    const routeBlock = content.slice(routeStart, routeEnd);
+
+    assert.equal(routeBlock.includes('/clear` then:'), false, 'resume route templates must not include `/clear` then:');
+  });
+
+  test('route_to_workflow block includes exception note explaining resume behavior', () => {
+    const workflowPath = path.join(__dirname, '..', 'gsd-core', 'workflows', 'resume-project.md');
+    const content = fs.readFileSync(workflowPath, 'utf-8');
+    const routeStart = content.indexOf('<step name="route_to_workflow">');
+    const routeEnd = content.indexOf('</step>', routeStart);
+    const routeBlock = content.slice(routeStart, routeEnd);
+
+    assert.match(routeBlock, /resume.*exception|exception.*resume/i);
+  });
+});
+  });
+}

@@ -5,19 +5,19 @@
 - **Issue:** #3660
 - **Implementation:** #3663 (Phase 1), feat/3663-runtime-artifact-layout-module-phase-1-m
 
-The **Runtime Surface Module** (`get-shit-done/bin/lib/surface.cjs`, introduced by ADR-0011 Phase 2) re-materializes a resolved Skill Surface profile to disk via `applySurface`. It currently hardcodes two artifact kinds (`commands`, `agents`) and re-derives their source directories via `_findInstallSource` / `_findAgentsSource` walk-up heuristics. The install and uninstall pipelines in `bin/install.js` each encode the same per-runtime artifact layout independently across ~14 install sites and ~6 uninstall sites. Bug #3659 surfaced the resulting drift: `applySurface` omits the `skills` kind for runtimes whose canonical layout is `skills/gsd-<stem>/SKILL.md`, so `gsd-surface profile <name>` leaves ~67 skill directories on disk under the install-time profile's footprint when the resolved profile should have pruned them — roughly 2.7k tokens per session on a measured workstation.
+The **Runtime Surface Module** (`gsd-core/bin/lib/surface.cjs`, introduced by ADR-0011 Phase 2) re-materializes a resolved Skill Surface profile to disk via `applySurface`. It currently hardcodes two artifact kinds (`commands`, `agents`) and re-derives their source directories via `_findInstallSource` / `_findAgentsSource` walk-up heuristics. The install and uninstall pipelines in `bin/install.js` each encode the same per-runtime artifact layout independently across ~14 install sites and ~6 uninstall sites. Bug #3659 surfaced the resulting drift: `applySurface` omits the `skills` kind for runtimes whose canonical layout is `skills/gsd-<stem>/SKILL.md`, so `gsd-surface profile <name>` leaves ~67 skill directories on disk under the install-time profile's footprint when the resolved profile should have pruned them — roughly 2.7k tokens per session on a measured workstation.
 
 The root problem is the absence of a typed seam for "where does runtime R put artifact kind K." Three lifecycle sites (install, uninstall, surface) each independently encode this knowledge and drift independently.
 
 ## Decision
 
-- Add a **Runtime Artifact Layout Module** at `get-shit-done/bin/lib/runtime-artifact-layout.cjs` as the single owner of the per-runtime artifact-placement table.
+- Add a **Runtime Artifact Layout Module** at `gsd-core/bin/lib/runtime-artifact-layout.cjs` as the single owner of the per-runtime artifact-placement table.
 - The module requires `runtime-homes.cjs` for the canonical runtime enum and global config-dir resolution. It adds the artifact-kind axis on top.
 - Expose `resolveRuntimeArtifactLayout(runtime, configDir) → Layout`. The returned `Layout` is a plain typed object — `{ runtime, configDir, kinds: ArtifactKind[] }` — with no I/O on resolution.
 - Each `ArtifactKind` is `{ kind: 'commands'|'agents'|'skills', destSubpath, prefix, stage }`. `stage` is a function `(resolvedProfile) → stagedDir` that closes over the per-runtime converter where one is needed (e.g. `convertClaudeCommandToClaudeSkill` for the `skills` kind on Claude global).
 - The `kinds` array is empty for runtimes with no GSD surface (a hypothetical future runtime with no integration). The `skills` kind is **absent** for runtimes that don't materialize skill directories (Cline; Gemini today). The `commands` kind is **absent** for runtimes that consume only the skills/agents layout (Claude global, Codex, etc.).
 - Per-runtime quirks live in the layout's record fields, not in caller branches:
-  - **Hermes**: `{ kind: 'skills', destSubpath: 'skills/gsd', prefix: '' }` — preserves the nested namespace from #2841.
+  - **Hermes**: `{ kind: 'skills', destSubpath: 'skills/gsd', prefix: 'gsd-' }` — preserves the nested namespace from #2841. **Note (#947):** The original decision used `prefix: ''` (bare stem) on the incorrect premise that the `skills/gsd/` category directory namespaced the leaf identifier in Hermes's loader. Research showed category dirs are purely organisational; dispatch is by the skill `name:` field. The `gsd-` prefix was restored by #947 to match every other runtime.
   - **Cline**: `kinds: []` — Cline resolves to zero kinds in Phase 1 (no `commands` kind).
   - **Gemini**: `kinds: [ { kind: 'commands', destSubpath: 'commands/gsd', prefix: 'gsd-' } ]` — no agents, no skills.
 - `applySurface` migrates from `(runtimeConfigDir, commandsDir, agentsDir, manifest, clusterMap)` to `(runtimeConfigDir, layout, manifest, clusterMap)`. Body collapses to `for (const kind of layout.kinds) _syncGsdDir(kind.stage(resolved), path.join(layout.configDir, kind.destSubpath), kind.kind)`.
@@ -29,7 +29,7 @@ The root problem is the absence of a typed seam for "where does runtime R put ar
 
 Phase 1 should land the module and one consumer (the bug-#3659 fix):
 
-1. New `get-shit-done/bin/lib/runtime-artifact-layout.cjs` — `resolveRuntimeArtifactLayout`, the typed `Layout`/`ArtifactKind` shapes, and the runtime table covering every runtime currently enumerated in `runtime-homes.cjs`.
+1. New `gsd-core/bin/lib/runtime-artifact-layout.cjs` — `resolveRuntimeArtifactLayout`, the typed `Layout`/`ArtifactKind` shapes, and the runtime table covering every runtime currently enumerated in `runtime-homes.cjs`.
 2. `surface.cjs:applySurface` migrates to layout-driven iteration. `_findInstallSource` and `_findAgentsSource` deleted. The `skills` kind is now iterated alongside `commands` and `agents` — bug #3659 closed.
 3. `commands/gsd/surface.md` and `tests/surface-apply.test.cjs` updated to construct + pass `Layout` values.
 4. New `tests/runtime-artifact-layout-*.test.cjs` covering:
@@ -47,10 +47,10 @@ Phase 1 should **not**:
 ## Migration Inventory
 
 ### New file
-- `get-shit-done/bin/lib/runtime-artifact-layout.cjs` — module body + runtime layout table.
+- `gsd-core/bin/lib/runtime-artifact-layout.cjs` — module body + runtime layout table.
 
 ### Files modified (Phase 1)
-- `get-shit-done/bin/lib/surface.cjs` — `applySurface` signature change; `_findInstallSource` + `_findAgentsSource` removal.
+- `gsd-core/bin/lib/surface.cjs` — `applySurface` signature change; `_findInstallSource` + `_findAgentsSource` removal.
 - `commands/gsd/surface.md` — runbook updates the 3 sites that call `applySurface` to first call `resolveRuntimeArtifactLayout`.
 - `tests/surface-apply.test.cjs` — 5 call sites pass `layout` instead of `commandsDir, agentsDir`.
 
@@ -73,7 +73,7 @@ Phase 1 should **not**:
  * @typedef {Object} ArtifactKind
  * @property {'commands'|'agents'|'skills'} kind
  * @property {string} destSubpath              joined to layout.configDir
- * @property {string} prefix                   'gsd-' or '' (Hermes nested case)
+ * @property {string} prefix                   'gsd-' for all runtimes (incl. Hermes after #947)
  * @property {(resolved) => string} stage      returns staged dir path
  */
 
@@ -132,17 +132,46 @@ function applySurface(runtimeConfigDir, layout, manifest, clusterMap) {
 - See `0011-skill-surface-budget-module.md` — the Runtime Surface Module this seam serves
 - See `0008-installer-migration-module.md` — legacy-layout migrations stay there
 - See `0005-sdk-architecture-seam-map.md` — the seam map this module joins
-- Existing canonical sibling: `get-shit-done/bin/lib/runtime-homes.cjs`
+- Existing canonical sibling: `gsd-core/bin/lib/runtime-homes.cjs`
 - Per-runtime skill converters this module references: `bin/install.js:1622` (Copilot), `:1681` (Claude), `:1792` (Antigravity), `:2534` (Codex)
 - Hermes nested-skills layout rationale: `#2841`
 
 ## Implementation status
 
 Phase 1 implementation landed on `feat/3663-runtime-artifact-layout-module-phase-1-m`:
-- `get-shit-done/bin/lib/runtime-artifact-layout.cjs` — 15-runtime layout table (grok intentionally excluded), `resolveRuntimeArtifactLayout(runtime, configDir, scope) → Layout`, walk-up `findInstallSourceRoot` helper.
+- `gsd-core/bin/lib/runtime-artifact-layout.cjs` — 15-runtime layout table (grok intentionally excluded), `resolveRuntimeArtifactLayout(runtime, configDir, scope) → Layout`, walk-up `findInstallSourceRoot` helper.
 - Clarification: in this Phase 1 implementation, **Cline resolves to zero kinds** (`kinds: []`), so it carries no `commands` kind in the layout table.
-- `get-shit-done/bin/lib/install-profiles.cjs` — new `stageSkillsForRuntimeAsSkills(srcCommandsDir, resolvedProfile, converter, prefix) → stagedDir` helper.
-- `get-shit-done/bin/lib/surface.cjs` — `applySurface(runtimeConfigDir, layout, manifest, clusterMap)` signature migration; `_findInstallSource` + `_findAgentsSource` deleted; `_syncGsdDir` extended to handle the `skills` kind via directory iteration.
+- `gsd-core/bin/lib/install-profiles.cjs` — new `stageSkillsForRuntimeAsSkills(srcCommandsDir, resolvedProfile, converter, prefix) → stagedDir` helper.
+- `gsd-core/bin/lib/surface.cjs` — `applySurface(runtimeConfigDir, layout, manifest, clusterMap)` signature migration; `_findInstallSource` + `_findAgentsSource` deleted; `_syncGsdDir` extended to handle the `skills` kind via directory iteration.
 - Tests: `runtime-artifact-layout-resolve.test.cjs` (16), `runtime-artifact-layout-edge-cases.test.cjs` (10), `runtime-artifact-layout-stage.test.cjs` (5), `install-profiles-stage.test.cjs` (+7 new), `surface-apply.test.cjs` (updated 5 call sites + new skills-kind test).
 
 Phase 2 (separate issue #3664 — `bin/install.js` install/uninstall pipeline migration) is blocked on Phase 1 merge.
+
+## Amendment (2026-06-11): adding a runtime that rides the established layout is an addendum, not a new ADR
+
+**Maintainer governance decision.** Registering an additional runtime that reuses the *existing* install machinery — the `profile-marker-only` install surface (ADR-58 / the config-adapter registry) plus a single `skills` kind in this module's layout table — is an **enhancement governed by this ADR via this addendum**, not a change that requires its own ADR. New design rationale (and a fuller amendment) is required only when a runtime introduces something this ADR has not already decided: a **new install surface**, a **new `ArtifactKind`**, or a layout quirk not expressible in the existing record fields (cf. the Hermes nested-namespace and Cline zero-kinds cases in the Decision section).
+
+This codifies the lightweight path the project has used since Phase 1 for Codex, Copilot, Trae, Windsurf, Qwen, CodeBuddy, Cline, Kimi, et al., and makes the addendum-vs-new-ADR test explicit so contributors and reviewers stop re-litigating it per runtime.
+
+### Qualifying criteria (all three) for the addendum path
+
+1. **No new install surface** — the runtime maps to an existing `installSurface` value in the config-adapter registry (`profile-marker-only`, etc.); `writesSharedSettings: false`; `finishPermissionWriter: null` or an existing writer.
+2. **No new artifact kind** — the layout entry is composed only of the existing `commands` / `agents` / `skills` kinds via the existing `skillsKind(...)` / record-field machinery; no new `ArtifactKind` shape.
+3. **Reuses the converter contract** — per-runtime converters follow the established shape (see the agent-frontmatter contract below); only the path/name substitutions differ.
+
+A runtime failing any of the three needs a fuller amendment here (or a new ADR) documenting the new surface/kind and its rationale.
+
+### Agent-frontmatter contract (normative)
+
+Per-runtime **agent** converters emit a **sanitized minimal frontmatter** — `name` + `description` only — rebuilt through `yamlIdentifier(name)` / `yamlQuote(toSingleLine(description))`, matching `convertClaudeAgentToTraeAgent` / `convertClaudeAgentToClineAgent` / `convertClaudeAgentToCodebuddyAgent`. Claude-specific fields (`tools:`, `color:`, commented hook blocks) MUST NOT be passed through verbatim. A runtime that genuinely requires richer agent frontmatter must document the target schema in an amendment here and emit it deliberately — not arrive at pass-through by accident. (Recorded because PR #1021's first cut of `convertClaudeAgentToQoderAgent` fell through to full pass-through; it must be brought onto the sibling contract.)
+
+### Qoder (issue #860 / PR #1021) — first runtime recorded under this addendum
+
+Qoder qualifies on all three criteria and is added as a layout-table entry, not a new design:
+
+- **Install surface:** `profile-marker-only` (config-adapter registry), identical shape to Trae/Windsurf — no statusline, no `package.json`, no shared `settings.json`/permission writes.
+- **Layout:** `case 'qoder'` → `[ skillsKind('skills', 'gsd-', 'convertClaudeCommandToQoderSkill', 'qoder', configDir) ]`; `'qoder'` added to `ALLOWED_RUNTIMES`.
+- **Home:** `~/.qoder` (or `QODER_CONFIG_DIR`), via `runtime-homes`.
+- **Converters:** `convertClaudeToQoderMarkdown`, `convertClaudeCommandToQoderSkill`, `convertClaudeAgentToQoderAgent` — the agent converter is subject to the contract above.
+
+**Path note:** since ADR-457's `.cts` migration, the canonical module source is `src/runtime-artifact-layout.cts` (built to `gsd-core/bin/lib/runtime-artifact-layout.cjs`); the runtime enumeration is owned by `src/runtime-homes.cts` and `src/runtime-config-adapter-registry.cts`. The original body above predates that move; paths read accordingly.

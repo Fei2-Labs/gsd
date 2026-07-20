@@ -4,13 +4,14 @@
 const fs = require('fs');
 const path = require('path');
 
+const { runMain } = require('./lib/cli-exit.cjs');
+
 const ROOT = path.join(__dirname, '..');
 
 const DEFAULT_RELATIVE_FILES = [
   '.github/workflows/test.yml',
   '.github/workflows/pr-template-format.yml',
   '.github/workflows/changeset-required.yml',
-  'scripts/lint-no-source-grep.cjs',
   'scripts/lint-command-contract.cjs',
   'scripts/lint-skill-deps.cjs',
   'scripts/lint-descriptions.cjs',
@@ -85,7 +86,7 @@ function main(argv = process.argv.slice(2)) {
 }
 
 if (require.main === module) {
-  process.exit(main());
+  runMain(main);
 }
 
 module.exports = {

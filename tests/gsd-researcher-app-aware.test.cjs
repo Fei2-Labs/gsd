@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * Phase Researcher Application-Aware Tests (#1988)
@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 
 const AGENTS_DIR = path.join(__dirname, '..', 'agents');
-const TEMPLATES_DIR = path.join(__dirname, '..', 'get-shit-done', 'templates');
+const TEMPLATES_DIR = path.join(__dirname, '..', 'gsd-core', 'templates');
 
 // ─── Phase Researcher: Architectural Responsibility Mapping ─────────────────
 
@@ -55,7 +55,7 @@ describe('phase-researcher: Architectural Responsibility Mapping', () => {
 
   test('step is a pure reasoning step with no tool calls', () => {
     // Extract the ARM section content (between the ARM heading and the next ## Step heading)
-    const armHeadingMatch = content.match(/## Step 1\.5[^\n]*Architectural Responsibility Map/);
+    const armHeadingMatch = content.match(/## Step 1\.5[^\r\n]*Architectural Responsibility Map/);
     assert.ok(armHeadingMatch, 'Must have a Step 1.5 heading for Architectural Responsibility Mapping');
 
     const armStart = content.indexOf(armHeadingMatch[0]);

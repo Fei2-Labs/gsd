@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * Cursor CLI Reviewer Tests (#1960)
@@ -28,19 +28,19 @@ describe('Cursor CLI reviewer in /gsd-review (#1960)', () => {
   // --- review.md workflow ---
 
   describe('review.md workflow', () => {
-    const reviewPath = path.join(ROOT, 'get-shit-done', 'workflows', 'review.md');
-    let content;
+    const reviewPath = path.join(ROOT, 'gsd-core', 'workflows', 'review.md');
+    let _content;
 
     test('review.md exists', () => {
       assert.ok(fs.existsSync(reviewPath), 'review.md should exist');
-      content = fs.readFileSync(reviewPath, 'utf-8');
+      _content = fs.readFileSync(reviewPath, 'utf-8');
     });
 
-    test('contains cursor CLI detection via command -v', () => {
+    test('contains cursor CLI detection via command -v cursor-agent', () => {
       const c = fs.readFileSync(reviewPath, 'utf-8');
       assert.ok(
-        c.includes('command -v cursor'),
-        'review.md should detect cursor CLI via "command -v cursor"'
+        c.includes('command -v cursor-agent'),
+        'review.md should detect cursor CLI via "command -v cursor-agent" (not the cursor IDE launcher)'
       );
     });
 
@@ -60,11 +60,47 @@ describe('Cursor CLI reviewer in /gsd-review (#1960)', () => {
       );
     });
 
-    test('contains cursor agent invocation command', () => {
+    test('invocation uses cursor-agent single binary with -p flag', () => {
       const c = fs.readFileSync(reviewPath, 'utf-8');
       assert.ok(
-        c.includes('cursor agent -p --mode ask --trust'),
-        'review.md should invoke cursor via "cursor agent -p --mode ask --trust"'
+        c.includes('cursor-agent -p'),
+        'review.md should invoke cursor via "cursor-agent -p" (single binary, not two-token "cursor agent")'
+      );
+    });
+
+    test('invocation includes --output-format text', () => {
+      const c = fs.readFileSync(reviewPath, 'utf-8');
+      assert.ok(
+        c.includes('--output-format text'),
+        'review.md cursor-agent invocation should include "--output-format text"'
+      );
+    });
+
+    test('invocation passes prompt as a file-path argument (not via stdin pipe)', () => {
+      const c = fs.readFileSync(reviewPath, 'utf-8');
+      assert.ok(
+        c.includes('Read the file at /tmp/gsd-review-prompt-'),
+        'review.md cursor-agent invocation should pass prompt by referencing the file path as an argument'
+      );
+    });
+
+    test('does NOT use broken two-token "cursor agent " form', () => {
+      const c = fs.readFileSync(reviewPath, 'utf-8');
+      // Must not match "cursor agent " (cursor + space + agent + space)
+      // The hyphenated "cursor-agent" must NOT trip this check — the regex uses a space, not a hyphen.
+      assert.ok(
+        !/cursor agent /.test(c),
+        'review.md must NOT contain the broken two-token form "cursor agent " (use "cursor-agent" instead)'
+      );
+    });
+
+    test('does NOT pipe the prompt into a cursor command via stdin', () => {
+      const c = fs.readFileSync(reviewPath, 'utf-8');
+      // Must not match a pipe feeding into a cursor command (e.g. "| cursor" or "|cursor")
+      // "cursor-agent" (hyphenated) must NOT trip this — the regex anchors on "cursor" not followed by "-agent"
+      assert.ok(
+        !/\| *cursor(?!-agent)/.test(c),
+        'review.md must NOT pipe the prompt to a cursor command via stdin'
       );
     });
 
@@ -111,7 +147,7 @@ describe('Cursor CLI reviewer in /gsd-review (#1960)', () => {
 
   describe('help.md', () => {
     // After #3039, help content moved into help/modes/full.md.
-    const helpPath = path.join(ROOT, 'get-shit-done', 'workflows', 'help', 'modes', 'full.md');
+    const helpPath = path.join(ROOT, 'gsd-core', 'workflows', 'help', 'modes', 'full.md');
 
     test('lists --cursor in /gsd-review signature', () => {
       const c = fs.readFileSync(helpPath, 'utf-8');
@@ -184,7 +220,6 @@ describe('Cursor CLI reviewer in /gsd-review (#1960)', () => {
     });
 
     test('mentions Cursor in the review section', () => {
-      const c = fs.readFileSync(jaPath, 'utf-8');
       assert.ok(
         /Cursor/i.test(fs.readFileSync(jaPath, 'utf-8')),
         'docs/ja-JP/FEATURES.md should mention Cursor in the review section'
@@ -218,7 +253,6 @@ describe('Cursor CLI reviewer in /gsd-review (#1960)', () => {
     });
 
     test('mentions Cursor in the review section', () => {
-      const c = fs.readFileSync(koPath, 'utf-8');
       assert.ok(
         /Cursor/i.test(fs.readFileSync(koPath, 'utf-8')),
         'docs/ko-KR/FEATURES.md should mention Cursor in the review section'

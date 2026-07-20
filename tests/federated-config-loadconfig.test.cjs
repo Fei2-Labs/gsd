@@ -1,0 +1,539 @@
+'use strict';
+
+/**
+ * federated-config-loadconfig.test.cjs — Tests for the federated config overlay
+ * wired into loadConfig (ADR-857 phase 3b).
+ *
+ * Tests:
+ *   1. EQUIVALENCE/no-op: with the real registry, loadConfig output has NO unexpected
+ *      extra keys (the UI keys are central so the overlay is empty).
+ *   2. FIXTURE federated key: inject a synthetic configSchema with a key NOT in
+ *      central schema → loadConfig surfaces it with its default.
+ *   3. FIXTURE federated key with user override: user config sets the federated key
+ *      to a valid value → that value is used.
+ *   4. MALFORMED registry: configSchema with bad slices → loadConfig returns a valid
+ *      config without throwing.
+ */
+
+const { describe, test, beforeEach, afterEach } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+
+const { cleanup } = require('./helpers.cjs');
+
+// ─── Module under test ────────────────────────────────────────────────────────
+
+const configLoader = require('../gsd-core/bin/lib/config-loader.cjs');
+const {
+  loadConfig,
+  _setFederatedRegistryForTests,
+  _resetFederatedRegistryForTests,
+} = configLoader;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function makeTempProject() {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-fed-cfg-test-'));
+  fs.mkdirSync(path.join(tmpDir, '.planning', 'phases'), { recursive: true });
+  return tmpDir;
+}
+
+function writeConfig(tmpDir, obj) {
+  fs.writeFileSync(
+    path.join(tmpDir, '.planning', 'config.json'),
+    JSON.stringify(obj, null, 2),
+    'utf-8',
+  );
+}
+
+// Keep track of temp dirs for cleanup
+let tmpDirs = [];
+
+beforeEach(() => {
+  tmpDirs = [];
+  _resetFederatedRegistryForTests();
+});
+
+afterEach(() => {
+  _resetFederatedRegistryForTests();
+  for (const d of tmpDirs) {
+    try { cleanup(d); } catch { /* ignore */ }
+  }
+});
+
+function mkTemp() {
+  const d = makeTempProject();
+  tmpDirs.push(d);
+  return d;
+}
+
+// ─── 1. Real registry overlay after Phase 6 cutover ──────────────────────────
+
+describe('REAL REGISTRY: capability config keys are surfaced by federated overlay', () => {
+  test('loadConfig with an empty config.json returns capability-owned defaults', () => {
+    const tmpDir = mkTemp();
+    // Write an empty config to trigger the try-branch (federated overlay path)
+    writeConfig(tmpDir, {});
+    const result = loadConfig(tmpDir);
+
+    // The result must be an object
+    assert.ok(typeof result === 'object' && result !== null, 'loadConfig must return an object');
+
+    // Known result keys that loadConfig always provides (from the main try-branch)
+    const knownKeys = [
+      'model_profile', 'commit_docs', 'search_gitignored', 'branching_strategy',
+      'research', 'plan_checker', 'verifier', 'parallelization', 'brave_search',
+      'firecrawl', 'exa_search', 'text_mode', 'auto_advance',
+      'mode', 'sub_repos', 'resolve_model_ids', 'context_window', 'phase_naming',
+      'project_code', 'subagent_timeout', 'model_overrides', 'models', 'granularity',
+      'granularities', 'planning', 'dynamic_routing', 'runtime', 'model_profile_overrides',
+      'model_policy', 'effort', 'fast_mode', 'agent_skills', 'manager',
+    ];
+
+    for (const key of knownKeys) {
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(result, key),
+        'Expected result to have key: ' + key,
+      );
+    }
+
+    const workflowSection = result['workflow'];
+    assert.ok(typeof workflowSection === 'object' && workflowSection !== null, 'workflow section must be created by federated overlay');
+    assert.strictEqual(workflowSection.ui_phase, true, 'workflow.ui_phase comes from the UI capability default');
+    assert.strictEqual(workflowSection.ui_review, true, 'workflow.ui_review comes from the UI capability default');
+    assert.strictEqual(workflowSection.ui_safety_gate, true, 'workflow.ui_safety_gate comes from the UI capability default');
+  });
+
+  test('loadConfig with a real config.json returns expected values plus capability defaults', () => {
+    const tmpDir = mkTemp();
+    writeConfig(tmpDir, { model_profile: 'balanced', research: true });
+    const result = loadConfig(tmpDir);
+
+    assert.strictEqual(result['model_profile'], 'balanced', 'model_profile from config');
+    assert.strictEqual(result['research'], true, 'research from config');
+
+    assert.strictEqual(result['ui_phase'], undefined, 'ui_phase should not appear as top-level key');
+    assert.strictEqual(result.workflow.ui_phase, true, 'workflow.ui_phase must be nested under workflow');
+  });
+});
+
+// ─── 2. Fixture federated key — value = default ──────────────────────────────
+
+describe('FIXTURE federated key: key not in central schema', () => {
+  test('injected configSchema with non-central key → appears in loadConfig result with default', () => {
+    const tmpDir = mkTemp();
+    // Write an empty config.json so loadConfig enters the try-branch (federated overlay path)
+    writeConfig(tmpDir, {});
+
+    // Inject a synthetic registry with a key not in the central schema
+    _setFederatedRegistryForTests({
+      configSchema: {
+        'mytool.enabled': {
+          owner: 'mytool',
+          type: 'boolean',
+          default: true,
+          description: 'Enable mytool.',
+        },
+      },
+    });
+
+    const result = loadConfig(tmpDir);
+
+    // mytool is not in the central schema, so the overlay should surface it
+    // The key 'mytool.enabled' is dotted → result should have result.mytool.enabled = true
+    const myToolSection = result['mytool'];
+    assert.ok(typeof myToolSection === 'object' && myToolSection !== null,
+      'mytool section must be created for dotted federated key');
+    assert.strictEqual(
+      (myToolSection)['enabled'],
+      true,
+      'mytool.enabled must default to true from slice',
+    );
+  });
+
+  test('injected top-level (non-dotted) federated key → appears in result', () => {
+    const tmpDir = mkTemp();
+    // Write an empty config.json to enter the try-branch
+    writeConfig(tmpDir, {});
+
+    _setFederatedRegistryForTests({
+      configSchema: {
+        'mytool_flag': {
+          owner: 'mytool',
+          type: 'boolean',
+          default: false,
+          description: 'Top-level mytool flag.',
+        },
+      },
+    });
+
+    const result = loadConfig(tmpDir);
+    // Top-level key: result['mytool_flag'] = false (the default)
+    // BUT: only added if NOT already present in _baseConfig
+    // 'mytool_flag' is not in the central schema, so it should be added
+    assert.strictEqual(result['mytool_flag'], false, 'mytool_flag should be set to default false');
+  });
+});
+
+// ─── 3. Fixture federated key — user override ────────────────────────────────
+
+describe('FIXTURE federated key: user config sets the key', () => {
+  test('user sets a federated key to a valid value → loadConfig uses user value', () => {
+    const tmpDir = mkTemp();
+
+    // Write a user config with a synthetic federated key
+    // The user config uses flat notation (mytool_flag: false)
+    writeConfig(tmpDir, { mytool_flag: true });
+
+    _setFederatedRegistryForTests({
+      configSchema: {
+        'mytool_flag': {
+          owner: 'mytool',
+          type: 'boolean',
+          default: false,
+          description: 'Top-level mytool flag.',
+        },
+      },
+    });
+
+    const result = loadConfig(tmpDir);
+    // The user set mytool_flag=true, which matches the type (boolean), so user value wins
+    assert.strictEqual(result['mytool_flag'], true, 'User-supplied true should override default false');
+  });
+
+  test('user sets a federated key to wrong type → loadConfig falls back to default', () => {
+    const tmpDir = mkTemp();
+    // Write a user config with the wrong type for the federated key
+    writeConfig(tmpDir, { mytool_flag: 'not-a-bool' });
+
+    _setFederatedRegistryForTests({
+      configSchema: {
+        'mytool_flag': {
+          owner: 'mytool',
+          type: 'boolean',
+          default: false,
+          description: 'Top-level mytool flag.',
+        },
+      },
+    });
+
+    const result = loadConfig(tmpDir);
+    // Wrong type → fallback to default (false)
+    assert.strictEqual(result['mytool_flag'], false, 'Should fall back to default on type mismatch');
+  });
+});
+
+// ─── FIX 1: Nested dotted-path user-override in loadConfig ───────────────────
+
+describe('FIX 1: nested user config drives federated overlay in loadConfig', () => {
+  test('user config { mytool: { enabled: false } } (NESTED) → loadConfig surfaces false', () => {
+    const tmpDir = mkTemp();
+    // Write config.json with the nested structure users actually write
+    writeConfig(tmpDir, { mytool: { enabled: false } });
+
+    _setFederatedRegistryForTests({
+      configSchema: {
+        'mytool.enabled': {
+          owner: 'mytool',
+          type: 'boolean',
+          default: true,
+          description: 'Enable mytool.',
+        },
+      },
+    });
+
+    const result = loadConfig(tmpDir);
+    const myToolSection = result['mytool'];
+    assert.ok(typeof myToolSection === 'object' && myToolSection !== null,
+      'mytool section must be in result');
+    assert.strictEqual(
+      (myToolSection)['enabled'],
+      false,
+      'Nested user override of false should override the default of true',
+    );
+  });
+});
+
+// ─── FIX 2: Overlay applied on no-config path ────────────────────────────────
+
+describe('FIX 2: overlay applied on the no-config path', () => {
+  test('project with NO config.json → federated default is surfaced (non-central key)', () => {
+    // Create a project dir WITHOUT a .planning/config.json
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-fed-noconfig-'));
+    tmpDirs.push(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, '.planning', 'phases'), { recursive: true });
+    // Intentionally do NOT write a config.json
+
+    _setFederatedRegistryForTests({
+      configSchema: {
+        'mytool.enabled': {
+          owner: 'mytool',
+          type: 'boolean',
+          default: false,
+          description: 'Enable mytool (default false).',
+        },
+      },
+    });
+
+    const result = loadConfig(tmpDir);
+    // The overlay must be applied on the no-config path: mytool.enabled should be false (the default)
+    const myToolSection = result['mytool'];
+    assert.ok(
+      typeof myToolSection === 'object' && myToolSection !== null,
+      'mytool section must be created by overlay even on no-config path, got: ' + JSON.stringify(result['mytool']),
+    );
+    assert.strictEqual(
+      (myToolSection)['enabled'],
+      false,
+      'mytool.enabled must default to false on no-config path',
+    );
+  });
+
+  test('no-config path with REAL registry → capability defaults are surfaced', () => {
+    _resetFederatedRegistryForTests();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-fed-noconfig-real-'));
+    tmpDirs.push(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, '.planning', 'phases'), { recursive: true });
+    // No config.json
+
+    const result = loadConfig(tmpDir);
+    assert.ok(typeof result === 'object' && result !== null, 'result must be an object');
+
+    const workflowSection = result['workflow'];
+    assert.ok(typeof workflowSection === 'object' && workflowSection !== null, 'workflow section must be created by real registry overlay');
+    assert.strictEqual(workflowSection.ui_phase, true, 'workflow.ui_phase must be injected on no-config path');
+    // model_profile must be present (it comes from defaults)
+    assert.ok(Object.prototype.hasOwnProperty.call(result, 'model_profile'), 'model_profile must be present');
+  });
+});
+
+// ─── FIX 3: Federated key in config.json → no unknown-key warning ─────────────
+
+describe('FIX 3: federated key present in config.json → no unknown-key warning', () => {
+  test('synthetic federated key in config.json → no "unknown config key" warning on stderr', () => {
+    const tmpDir = mkTemp();
+    // Write a config.json that contains a key matching our synthetic federated key's top-level segment
+    writeConfig(tmpDir, { mytool: { enabled: true } });
+
+    _setFederatedRegistryForTests({
+      configSchema: {
+        'mytool.enabled': {
+          owner: 'mytool',
+          type: 'boolean',
+          default: false,
+          description: 'Enable mytool.',
+        },
+      },
+    });
+
+    // Capture stderr to check for unknown-key warning
+    const stderrChunks = [];
+    const origWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk, ...args) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : String(chunk));
+      return origWrite(chunk, ...args);
+    };
+
+    try {
+      const result = loadConfig(tmpDir);
+      // mytool.enabled is in the federated registry → KNOWN_TOP_LEVEL should include 'mytool'
+      // → no "unknown config key(s)" warning for 'mytool'
+      const stderrOutput = stderrChunks.join('');
+      // TV-16: ONE tight regex for an "unknown config key … mytool" warning (in either order on a line),
+      // asserted to NOT match. The prior `!includes(A) || !includes(B)` was loose: it passed whenever
+      // EITHER substring was absent, so an unknown-key warning that named a DIFFERENT key (A present, B
+      // absent) would still pass it vacuously. The single regex matches only the specific bad warning.
+      const unknownMyTool = /unknown config key[^\n]*\bmytool\b|\bmytool\b[^\n]*unknown config key/i;
+      assert.ok(
+        !unknownMyTool.test(stderrOutput),
+        'Should NOT warn about mytool as an unknown key when it is a registered federated key. stderr: ' + stderrOutput,
+      );
+      // The value should be set from user config
+      const myToolSection = result['mytool'];
+      assert.ok(
+        typeof myToolSection === 'object' && myToolSection !== null,
+        'mytool section should be in result',
+      );
+    } finally {
+      process.stderr.write = origWrite;
+    }
+  });
+});
+
+// ─── 4. Malformed registry — loadConfig still works ──────────────────────────
+
+describe('MALFORMED registry: loadConfig does not throw', () => {
+  test('configSchema with all malformed slices → loadConfig returns valid config, no throw', () => {
+    const tmpDir = mkTemp();
+
+    _setFederatedRegistryForTests({
+      configSchema: {
+        'bad.key1': null,
+        'bad.key2': 'just-a-string',
+        'bad.key3': { type: 'xml', default: '<x/>' },        // invalid type
+        'bad.key4': { type: 'boolean', description: 'ok' },  // missing default
+        'bad.key5': {},                                        // missing both
+      },
+    });
+
+    let result;
+    assert.doesNotThrow(() => {
+      result = loadConfig(tmpDir);
+    }, 'loadConfig must not throw even with all-malformed configSchema');
+
+    assert.ok(typeof result === 'object' && result !== null, 'result must be an object');
+    // None of the bad keys should appear in the result
+    assert.strictEqual(result['bad.key1'], undefined);
+    assert.strictEqual(result['bad.key2'], undefined);
+    const badSection = result['bad'];
+    if (badSection && typeof badSection === 'object') {
+      assert.strictEqual((badSection)['key1'], undefined, 'bad.key1 must not be set');
+    }
+  });
+
+  test('configSchema is a string (completely unexpected) → loadConfig still works', () => {
+    const tmpDir = mkTemp();
+
+    _setFederatedRegistryForTests({
+      configSchema: 'not-an-object',
+    });
+
+    let result;
+    assert.doesNotThrow(() => {
+      result = loadConfig(tmpDir);
+    }, 'loadConfig must not throw with non-object configSchema');
+
+    assert.ok(typeof result === 'object' && result !== null, 'result must be an object');
+  });
+
+  test('registry throws during configSchema access → loadConfig still returns base config', () => {
+    const tmpDir = mkTemp();
+
+    // Create a registry proxy that throws when configSchema is accessed
+    const throwingRegistry = {
+      get configSchema() { throw new Error('registry exploded'); },
+    };
+
+    _setFederatedRegistryForTests(throwingRegistry);
+
+    let result;
+    assert.doesNotThrow(() => {
+      result = loadConfig(tmpDir);
+    }, 'loadConfig must not throw even if registry access throws');
+
+    assert.ok(typeof result === 'object' && result !== null, 'result must still be an object');
+    // The base config keys must be present
+    assert.ok(Object.prototype.hasOwnProperty.call(result, 'model_profile'), 'model_profile must be present');
+  });
+});
+
+// ─── 5. ADR-1244 D2: overlay config-key federation is cwd-aware (REAL loader, no seam) ──
+//
+// Proves "toggable via config" for installed third-party capabilities AND that it
+// is cwd-correct: an overlay capability's config key is valid + federates ONLY in
+// the project where the overlay is installed — never globally, never for the wrong
+// project, never from a bare require (no seam used here — the real loadRegistry path).
+describe('ADR-1244 D2: overlay config-key federation (cwd-aware, real loader)', () => {
+  const configSchema = require('../gsd-core/bin/lib/config-schema.cjs');
+  const KEY = 'workflow.overlay_demo_gate';
+  const overlayCap = {
+    id: 'overlay-demo', role: 'feature', version: '1.0.0', title: 'Overlay demo', description: 'overlay',
+    tier: 'standard', requires: [], engines: { gsd: '>=1.0.0' },
+    runtimeCompat: { supported: ['*'], unsupported: [] },
+    skills: ['overlay-demo-skill'], agents: [], hooks: [],
+    config: { [KEY]: { type: 'boolean', default: true, description: 'overlay-owned federated key' } },
+    steps: [], contributions: [], gates: [],
+  };
+
+  let sandboxHome, withOverlay, withoutOverlay, savedHome;
+  beforeEach(() => {
+    _resetFederatedRegistryForTests(); // NO seam override — exercise the real cwd-aware path
+    savedHome = process.env.GSD_HOME;
+    sandboxHome = makeTempProject();
+    process.env.GSD_HOME = sandboxHome; // empty global overlay root
+    withOverlay = mkTemp();
+    const capDir = path.join(withOverlay, '.gsd', 'capabilities', 'overlay-demo');
+    fs.mkdirSync(capDir, { recursive: true });
+    fs.writeFileSync(path.join(capDir, 'capability.json'), JSON.stringify(overlayCap), 'utf-8');
+    // #1459: a PROJECT-scope overlay activates only with a committed ledger AND a user consent record
+    // on this machine. Write both so the cwd-aware federation under test reflects a genuinely-installed
+    // + consented overlay (a forged/cloned in-repo project ledger alone no longer federates the key).
+    fs.writeFileSync(
+      path.join(withOverlay, '.gsd-capabilities.json'),
+      JSON.stringify({ version: '1', updatedAt: '2026-01-01T00:00:00Z', entries: {
+        'overlay-demo': { id: 'overlay-demo', version: '1.0.0', source: 's', integrity: 'sha512-od', files: [], sharedEdits: [] },
+      } }),
+      'utf-8',
+    );
+    {
+      const trust = require('../gsd-core/bin/lib/capability-trust.cjs');
+      const consent = require('../gsd-core/bin/lib/capability-consent.cjs');
+      consent.recordProjectConsent({
+        gsdHome: sandboxHome, projectRoot: withOverlay, id: 'overlay-demo',
+        integrity: 'sha512-od',
+        // IC-10: single-arg signatureForManifest (lifecycle RECORD convention). CB-1/CB-2: the contentHash
+        // is THE security binding the loader recomputes — it MUST be present + non-empty (recordProjectConsent
+        // now throws otherwise), and must equal the recomputed bundle hash over the on-disk capDir.
+        disclosureSignature: trust.signatureForManifest(overlayCap),
+        contentHash: consent.bundleContentHash(capDir),
+      });
+    }
+    withoutOverlay = mkTemp();
+  });
+  afterEach(() => {
+    if (savedHome === undefined) delete process.env.GSD_HOME; else process.env.GSD_HOME = savedHome;
+    try { cleanup(sandboxHome); } catch { /* ignore */ }
+  });
+
+  test('overlay config key is valid in its own project, unknown elsewhere and with no cwd', () => {
+    assert.equal(configSchema.isValidConfigKey(KEY, withOverlay), true, 'valid in the project that installs the overlay');
+    assert.equal(configSchema.isValidConfigKey(KEY, withoutOverlay), false, 'unknown in a project without the overlay (cwd-correct)');
+    assert.equal(configSchema.isValidConfigKey(KEY), false, 'unknown with no cwd (first-party only)');
+  });
+
+  test('loadConfig federates the overlay key default only for the installing project', () => {
+    writeConfig(withOverlay, {});
+    const cfg = loadConfig(withOverlay);
+    assert.strictEqual(cfg.workflow && cfg.workflow.overlay_demo_gate, true, 'overlay default federates in its project');
+
+    writeConfig(withoutOverlay, {});
+    const other = loadConfig(withoutOverlay);
+    assert.strictEqual(
+      other.workflow ? other.workflow.overlay_demo_gate : undefined,
+      undefined,
+      'overlay key does NOT federate into an unrelated project',
+    );
+  });
+
+  test('IC-08: a committed project ledger WITHOUT a consent record does NOT federate the overlay config key', () => {
+    // revert-fails: if the loader federated a project overlay's config key from the in-repo committed
+    // ledger alone (the pre-#1459 bypass), this key would be valid + federated WITHOUT any user consent
+    // record — a forged/cloned repo would inject config keys. The consent gate suppresses it, so the key
+    // is ABSENT from isValidConfigKey AND from loadConfig output.
+    const noConsent = mkTemp();
+    const capDir = path.join(noConsent, '.gsd', 'capabilities', 'overlay-demo');
+    fs.mkdirSync(capDir, { recursive: true });
+    fs.writeFileSync(path.join(capDir, 'capability.json'), JSON.stringify(overlayCap), 'utf-8');
+    // A committed-looking project ledger (repo-plantable) — but NO consent record on this machine.
+    fs.writeFileSync(
+      path.join(noConsent, '.gsd-capabilities.json'),
+      JSON.stringify({ version: '1', updatedAt: '2026-01-01T00:00:00Z', entries: {
+        'overlay-demo': { id: 'overlay-demo', version: '1.0.0', source: 's', integrity: 'sha512-od', files: [], sharedEdits: [] },
+      } }),
+      'utf-8',
+    );
+    // Sanity: the WITH-consent fixture DOES federate (proves the only difference is the consent record).
+    assert.equal(configSchema.isValidConfigKey(KEY, withOverlay), true, 'precondition: the consented fixture federates the key');
+    // The unconsented project: key is unknown + does not federate.
+    assert.equal(configSchema.isValidConfigKey(KEY, noConsent), false, 'unconsented project ledger does NOT make the key valid');
+    writeConfig(noConsent, {});
+    const cfg = loadConfig(noConsent);
+    assert.strictEqual(
+      cfg.workflow ? cfg.workflow.overlay_demo_gate : undefined,
+      undefined,
+      'unconsented project overlay config key is ABSENT from loadConfig output',
+    );
+  });
+});

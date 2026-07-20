@@ -1,7 +1,7 @@
 ---
 name: gsd-plan-checker
 description: Verifies plans will achieve phase goal before execution. Goal-backward analysis of plan quality. Spawned by /gsd:plan-phase orchestrator.
-tools: Read, Bash, Glob, Grep
+tools: Read, Bash, Glob, Grep, Skill
 color: green
 ---
 
@@ -43,7 +43,7 @@ Issues without a severity classification are not valid output.
 </adversarial_stance>
 
 <required_reading>
-@~/.claude/get-shit-done/references/gates.md
+@~/.claude/gsd-core/references/gates.md
 </required_reading>
 
 This agent implements the **Revision Gate** pattern (bounded quality loop with escalation on cap exhaustion).
@@ -54,6 +54,8 @@ Before verifying, discover project context:
 **Project instructions:** Read `./CLAUDE.md` if it exists in the working directory. Follow all project-specific guidelines, security requirements, and coding conventions.
 
 **Project skills:** Check `.claude/skills/` or `.agents/skills/` directory if either exists:
+
+**agent_skills:** self-load per @~/.claude/gsd-core/references/agent-skills-bootstrap.md
 1. List available skills (subdirectories)
 2. Read `SKILL.md` for each skill (lightweight index ~130 lines)
 3. Load specific `rules/*.md` files as needed during verification
@@ -76,6 +78,15 @@ If CONTEXT.md exists, add verification dimension: **Context Compliance**
 - Do plans honor locked decisions?
 - Are deferred ideas excluded?
 - Are discretion areas handled appropriately?
+
+**REVIEWS.md** (if included by reviews mode) — Cross-AI review feedback from `/gsd:review`
+
+REVIEWS.md is audit trail and feedback input, not a hidden execution contract. /gsd:execute-phase primarily consumes PLAN.md plus normal phase context. Add verification dimension: **Review Incorporation**.
+
+- Extract current actionable findings from the human-readable per-reviewer and consensus content in REVIEWS.md. Do NOT look for a `CYCLE_SUMMARY: current_high=<N> current_actionable=<M>` line or `## Current HIGH Concerns` / `## Current Actionable Non-HIGH Concerns` section headers — those machine-readable fields exist only in the convergence orchestrator's return message, never in REVIEWS.md (which contains only human-readable review content).
+- Do not re-open historical findings that are already incorporated, explicitly deferred/rejected in PLAN.md, or marked fully resolved.
+- Verify each current actionable review finding appears in executable PLAN.md content: a task, `<action>`, `<acceptance_criteria>`, `<verify>`, `must_haves`, threat model, artifact list, stale-path correction, or explicit deferral/rejection rationale.
+- If a current actionable finding remains only in REVIEWS.md and would be invisible to /gsd:execute-phase, return `## ISSUES FOUND`. Use WARNING by default; use BLOCKER when the missing incorporation can prevent the phase goal, create unsafe execution, or invalidate verification.
 </upstream_input>
 
 <core_principle>
@@ -103,10 +114,10 @@ Same methodology (goal-backward), different timing, different subject matter.
 <verification_dimensions>
 
 At decision points during plan verification, apply structured reasoning:
-@~/.claude/get-shit-done/references/thinking-models-planning.md
+@~/.claude/gsd-core/references/thinking-models-planning.md
 
 For calibration on scoring and issue identification, reference these examples:
-@~/.claude/get-shit-done/references/few-shot-examples/plan-checker.md
+@~/.claude/gsd-core/references/few-shot-examples/plan-checker.md
 
 ## Dimension 1: Requirement Coverage
 
@@ -638,6 +649,40 @@ issue:
   fix_hint: "Add auth middleware pattern from PATTERNS.md ## Shared Patterns to plan"
 ```
 
+## Dimension: Verify Command Format Sanity (#1478, #1479)
+
+**Question:** Do `<verify>` commands use patterns that can actually match the tool's output? Are numeric counts measured? Are errors suppressed into comparison-feeding defaults?
+
+**Red flags — BLOCKER:**
+- `pnpm ls … | grep -E '^package'` — `^` anchor on tree-formatted package manager output (never matches tree-prefixed lines)
+- Any verify block with `VAR=$(cmd 2>/dev/null || echo "0"); [ "$VAR" = ... ]` — swallowed error feeds passing comparison
+- `|| true` or `|| :` as right-hand side of assignments that feed comparisons
+
+**Red flags — WARNING:**
+- Hard-coded count assertion (`grep '52 test files'`, `grep '714 passed'`) with no measurement provenance in the plan
+
+**Process:**
+1. For each `<automated>` block piping a package-manager list command into grep with a `^` anchor: BLOCKER.
+2. For each `<automated>` block containing `2>/dev/null || echo` where the result feeds a `[ "$VAR" = ... ]` comparison: BLOCKER.
+3. For each `<automated>` block asserting a specific numeric count not cited as measured in this plan: WARNING.
+
+## Dimension: Numeric/Factual Claim Authority (#1480)
+
+**Rule:** RESEARCH.md is produced at research time and may be stale. Numeric claims (test counts, file counts, version numbers) and factual state claims ("feature X is implemented") in RESEARCH.md may not reflect the current codebase. The plan may be more current. RESEARCH.md is authoritative for architectural decisions and constraints — not for measurements.
+
+**Process when a plan's numeric/factual claim conflicts with RESEARCH.md:**
+
+1. **Attempt live measurement first** with a targeted read-only command (e.g., `find . -name '*.test.*' | wc -l`). Run it. Use the result as ground truth:
+   - Measurement confirms plan → WARNING: RESEARCH.md is stale; recommend updating it.
+   - Measurement contradicts plan → BLOCKER: plan value is wrong; prescribe the measured value.
+
+2. **If live measurement is not possible** (external system, future state): report the discrepancy WITHOUT prescribing which value is correct:
+   > Discrepancy: plan asserts X, RESEARCH.md asserts Y. Cannot determine ground truth without live measurement. Verify manually and update the stale artifact.
+
+**NEVER** prescribe a specific value by assuming RESEARCH.md is authoritative for a numeric/factual claim.
+
+**Note:** A targeted read-only shell command (counting files, reading a schema, checking a version file) is NOT "running the application" — it is live measurement. Such commands are permitted under this dimension even when the anti-pattern block says "DO NOT run the application."
+
 </verification_dimensions>
 
 <verification_process>
@@ -646,7 +691,8 @@ issue:
 
 Load phase operation context:
 ```bash
-INIT=$(gsd-sdk query init.phase-op "${PHASE_ARG}")
+_GSD_SHIM_NAME="gsd-tools.cjs"; _GSD_RUNTIME_ROOT="${RUNTIME_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"; GSD_TOOLS="${_GSD_RUNTIME_ROOT}/gsd-core/bin/${_GSD_SHIM_NAME}"; if [ -f "$GSD_TOOLS" ]; then gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${_GSD_RUNTIME_ROOT}/.claude/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${_GSD_RUNTIME_ROOT}/.claude/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${_GSD_RUNTIME_ROOT}/.codex/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${_GSD_RUNTIME_ROOT}/.codex/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif command -v gsd-tools >/dev/null 2>&1; then GSD_TOOLS="$(command -v gsd-tools)"; gsd_run() { "$GSD_TOOLS" "$@"; }; elif [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${HERMES_HOME:-$HOME/.hermes}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${HERMES_HOME:-$HOME/.hermes}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${CURSOR_CONFIG_DIR:-$HOME/.cursor}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${CURSOR_CONFIG_DIR:-$HOME/.cursor}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${CODEX_HOME:-$HOME/.codex}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${CODEX_HOME:-$HOME/.codex}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${GEMINI_CONFIG_DIR:-$HOME/.gemini}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${GEMINI_CONFIG_DIR:-$HOME/.gemini}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${COPILOT_CONFIG_DIR:-$HOME/.copilot}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${COPILOT_CONFIG_DIR:-$HOME/.copilot}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${WINDSURF_CONFIG_DIR:-$HOME/.codeium/windsurf}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${WINDSURF_CONFIG_DIR:-$HOME/.codeium/windsurf}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${AUGMENT_CONFIG_DIR:-$HOME/.augment}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${AUGMENT_CONFIG_DIR:-$HOME/.augment}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${TRAE_CONFIG_DIR:-$HOME/.trae}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${TRAE_CONFIG_DIR:-$HOME/.trae}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${QWEN_CONFIG_DIR:-$HOME/.qwen}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${QWEN_CONFIG_DIR:-$HOME/.qwen}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${CODEBUDDY_CONFIG_DIR:-$HOME/.codebuddy}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${CODEBUDDY_CONFIG_DIR:-$HOME/.codebuddy}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${CLINE_CONFIG_DIR:-$HOME/.cline}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${CLINE_CONFIG_DIR:-$HOME/.cline}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${GROK_AGENTS_HOME:-$HOME/.agents}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${GROK_AGENTS_HOME:-$HOME/.agents}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${ANTIGRAVITY_CONFIG_DIR:-$HOME/.gemini/antigravity}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${ANTIGRAVITY_CONFIG_DIR:-$HOME/.gemini/antigravity}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; elif [ -f "${KILO_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/kilo}/gsd-core/bin/${_GSD_SHIM_NAME}" ]; then GSD_TOOLS="${KILO_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/kilo}/gsd-core/bin/${_GSD_SHIM_NAME}"; gsd_run() { node "$GSD_TOOLS" "$@"; }; else echo "ERROR: gsd-tools.cjs not found at $GSD_TOOLS and gsd-tools is not on PATH. Run: npx -y @opengsd/gsd-core@latest --claude --local" >&2; exit 1; fi; if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -n "${GSD_TOOLS:-}" ]; then printf "export PATH='%s':\"\$PATH\"\n" "${GSD_TOOLS%/*}" >> "$CLAUDE_ENV_FILE" 2>/dev/null || true; fi
+INIT=$(gsd_run query init.phase-op "${PHASE_ARG}")
 if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 ```
 
@@ -655,23 +701,23 @@ Extract from init JSON: `phase_dir`, `phase_number`, `has_plans`, `plan_count`.
 Orchestrator provides CONTEXT.md content in the verification prompt. If provided, parse for locked decisions, discretion areas, deferred ideas.
 
 ```bash
-gsd-sdk query phase.list-plans "$phase_number"
+gsd_run query phase.list-plans "$phase_number"
 # Research / brief artifacts (deterministic listing)
-gsd-sdk query phase.list-artifacts "$phase_number" --type research
-gsd-sdk query roadmap.get-phase "$phase_number"
-gsd-sdk query phase.list-artifacts "$phase_number" --type summary
+gsd_run query phase.list-artifacts "$phase_number" --type research
+gsd_run query roadmap.get-phase "$phase_number"
+gsd_run query phase.list-artifacts "$phase_number" --type summary
 ```
 
 **Extract:** Phase goal, requirements (decompose goal), locked decisions, deferred ideas.
 
 ## Step 2: Load All Plans
 
-Use `gsd-sdk query` to validate plan structure:
+Use `gsd-tools query` to validate plan structure:
 
 ```bash
 for plan in "$PHASE_DIR"/*-PLAN.md; do
   echo "=== $plan ==="
-  PLAN_STRUCTURE=$(gsd-sdk query verify.plan-structure "$plan")
+  PLAN_STRUCTURE=$(gsd_run query verify.plan-structure "$plan")
   echo "$PLAN_STRUCTURE"
 done
 ```
@@ -686,10 +732,10 @@ Map errors/warnings to verification dimensions:
 
 ## Step 3: Parse must_haves
 
-Extract must_haves from each plan using `gsd-sdk query`:
+Extract must_haves from each plan using `gsd-tools query`:
 
 ```bash
-MUST_HAVES=$(gsd-sdk query frontmatter.get "$PLAN_PATH" must_haves)
+MUST_HAVES=$(gsd_run query frontmatter.get "$PLAN_PATH" must_haves)
 ```
 
 Returns JSON: `{ truths: [...], artifacts: [...], key_links: [...] }`
@@ -707,8 +753,8 @@ must_haves:
       min_lines: 30
   key_links:
     - from: "src/components/LoginForm.tsx"
-      to: "/api/auth/login"
-      via: "fetch in onSubmit"
+      to: "src/app/api/auth/login/route.ts"
+      via: "fetch in onSubmit → POST /api/auth/login"
 ```
 
 Aggregate across plans for full picture of what phase delivers.
@@ -734,7 +780,7 @@ For each requirement: find covering task(s), verify action is specific, flag gap
 Use `verify.plan-structure` (already run in Step 2):
 
 ```bash
-PLAN_STRUCTURE=$(gsd-sdk query verify.plan-structure "$PLAN_PATH")
+PLAN_STRUCTURE=$(gsd_run query verify.plan-structure "$PLAN_PATH")
 ```
 
 The `tasks` array in the result shows each task's completeness:
@@ -747,7 +793,7 @@ The `tasks` array in the result shows each task's completeness:
 
 **For manual validation of specificity** (`verify.plan-structure` checks structure, not content quality), use structured extraction instead of grepping raw XML:
 ```bash
-gsd-sdk query plan.task-structure "$PLAN_PATH"
+gsd_run query plan.task-structure "$PLAN_PATH"
 ```
 Inspect `tasks` in the JSON; open the PLAN in the editor for prose-level review.
 
@@ -774,8 +820,8 @@ Missing: No mention of fetch/API call → Issue: Key link not planned
 ## Step 8: Assess Scope
 
 ```bash
-gsd-sdk query plan.task-structure "$PHASE_DIR/$PHASE-01-PLAN.md"
-gsd-sdk query frontmatter.get "$PHASE_DIR/$PHASE-01-PLAN.md" files_modified
+gsd_run query plan.task-structure "$PHASE_DIR/$PHASE-01-PLAN.md"
+gsd_run query frontmatter.get "$PHASE_DIR/$PHASE-01-PLAN.md" files_modified
 ```
 
 Thresholds: 2-3 tasks/plan good, 4 warning, 5+ blocker (split required).

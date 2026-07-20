@@ -38,6 +38,7 @@
   - [モデルプロファイル](#26-モデルプロファイル)
 - [ブラウンフィールド機能](#ブラウンフィールド機能)
   - [コードベースマッピング](#27-コードベースマッピング)
+  - [既存コードベースオンボーディング](#27b-既存コードベースオンボーディング)
 - [ユーティリティ機能](#ユーティリティ機能)
   - [デバッグシステム](#28-デバッグシステム)
   - [Todo 管理](#29-todo-管理)
@@ -73,8 +74,6 @@
 - [v1.29 の機能](#v129-の機能)
   - [Windsurf ランタイムサポート](#56-windsurf-ランタイムサポート)
   - [国際化ドキュメント](#57-国際化ドキュメント)
-- [v1.30 の機能](#v130-の機能)
-  - [GSD SDK](#58-gsd-sdk)
 - [v1.31 の機能](#v131-の機能)
   - [スキーマドリフト検出](#59-スキーマドリフト検出)
   - [セキュリティエンフォースメント](#60-セキュリティエンフォースメント)
@@ -104,6 +103,68 @@
   - [レスポンス言語設定](#83-レスポンス言語設定)
   - [手動アップデート手順](#84-手動アップデート手順)
   - [新規ランタイムサポート (Trae, Cline, Augment Code)](#85-新規ランタイムサポート-trae-cline-augment-code)
+  - [自律モード `--interactive` フラグ](#86-自律モード---interactive-フラグ)
+  - [コミットドキュメントガードフック](#87-コミットドキュメントガードフック)
+  - [コミュニティフックオプトイン](#88-コミュニティフックオプトイン)
+- [v1.34.0 の機能](#v1340-の機能)
+  - [グローバル学習ストア](#89-グローバル学習ストア)
+  - [クエリ可能コードベースインテリジェンス](#90-クエリ可能コードベースインテリジェンス)
+  - [実行コンテキストプロファイル](#91-実行コンテキストプロファイル)
+  - [ゲート分類法](#92-ゲート分類法)
+  - [コードレビューパイプライン](#93-コードレビューパイプライン)
+  - [ソクラテス的探索](#94-ソクラテス的探索)
+  - [セーフアンドゥ](#95-セーフアンドゥ)
+  - [プランインポート](#96-プランインポート)
+  - [高速コードベーススキャン](#97-高速コードベーススキャン)
+  - [自律監査から修正](#98-自律監査から修正)
+  - [改善されたプロンプトインジェクションスキャナー](#99-改善されたプロンプトインジェクションスキャナー)
+  - [プランフェーズのストール検出](#100-プランフェーズのストール検出)
+  - [/gsd-progress --next のハードストップ安全ゲート](#101-gsd-progress---next-のハードストップ安全ゲート)
+  - [アダプティブモデルプリセット](#102-アダプティブモデルプリセット)
+  - [ポストマージハンク検証](#103-ポストマージハンク検証)
+- [v1.35.0 の機能](#v1350-の機能)
+  - [新規ランタイムサポート (Cline, CodeBuddy, Qwen Code)](#104-新規ランタイムサポート-cline-codebuddy-qwen-code)
+  - [GSD-2 逆マイグレーション](#105-gsd-2-逆マイグレーション)
+  - [AI 統合フェーズウィザード](#106-ai-統合フェーズウィザード)
+  - [AI 評価レビュー](#107-ai-評価レビュー)
+- [v1.36.0 の機能](#v1360-の機能)
+  - [プランバウンス](#108-プランバウンス)
+  - [外部コードレビューコマンド](#109-外部コードレビューコマンド)
+  - [クロス AI 実行デリゲーション](#110-クロス-ai-実行デリゲーション)
+  - [アーキテクチャ責任マッピング](#111-アーキテクチャ責任マッピング)
+  - [学習の抽出](#112-学習の抽出)
+  - [コンテキストウィンドウ対応プロンプト薄化](#114-コンテキストウィンドウ対応プロンプト薄化)
+  - [設定可能な CLAUDE.md パス](#115-設定可能な-claudemd-パス)
+  - [TDD パイプラインモード](#116-tdd-パイプラインモード)
+- [v1.37.0 の機能](#v1370-の機能)
+  - [スパイクコマンド](#117-スパイクコマンド)
+  - [スケッチコマンド](#118-スケッチコマンド)
+  - [エージェントサイズ予算強制](#119-エージェントサイズ予算強制)
+  - [共有ボイラープレート抽出](#120-共有ボイラープレート抽出)
+  - [ナレッジグラフ統合](#121-ナレッジグラフ統合)
+- [v1.40.0 の機能](#v1400-の機能)
+  - [スキルサーフェス統合](#122-スキルサーフェス統合)
+  - [ネームスペースメタスキル（2 段階ルーティング）](#123-ネームスペースメタスキル2-段階ルーティング)
+  - [コンテキストウィンドウ使用率ガード](#124-コンテキストウィンドウ使用率ガード)
+  - [フェーズライフサイクルステータス行リードサイド](#125-フェーズライフサイクルステータス行リードサイド)
+- [v1.41.0 の機能](#v1410-の機能)
+  - [フェーズタイプごとのモデル選択](#126-フェーズタイプごとのモデル選択)
+  - [失敗ティアエスカレーション付き動的ルーティング](#127-失敗ティアエスカレーション付き動的ルーティング)
+  - [アップデートバナーオプトイン](#128-アップデートバナーオプトイン)
+  - [issue-driven-orchestration ガイド](#129-issue-driven-orchestration-ガイド)
+  - [グラファイファイコミットベースの古さ検出](#130-グラファイファイコミットベースの古さ検出)
+- [v1.42.1 の機能](#v1421-の機能)
+  - [パッケージ正当性ゲート](#132-パッケージ正当性ゲート)
+  - [スキルサーフェス予算](#133-スキルサーフェス予算)
+  - [インストーラーマイグレーション](#134-インストーラーマイグレーション)
+  - [カスタムシップ PR ボディセクション](#135-カスタムシップ-pr-ボディセクション)
+  - [レビューデフォルトレビュアー](#136-レビューデフォルトレビュアー)
+  - [ファロー構造レビュープリパス](#137-ファロー構造レビュープリパス)
+  - [フェーズ終了時の人間検証モード](#138-フェーズ終了時の人間検証モード)
+  - [クォータとレート制限の失敗分類](#139-クォータとレート制限の失敗分類)
+  - [ステータス行コンテキスト位置](#140-ステータス行コンテキスト位置)
+  - [マイルストーンタグ作成トグル](#141-マイルストーンタグ作成トグル)
+  - [構造化 JSON エラーモード](#142-構造化-json-エラーモード)
 
 ---
 
@@ -168,6 +229,8 @@
 - REQ-DISC-05: システムは推奨デフォルトを自動選択する `--auto` フラグをサポートしなければならない
 - REQ-DISC-06: システムはグループ化された質問取り込みのための `--batch` フラグをサポートしなければならない
 - REQ-DISC-07: システムはグレーゾーンを特定する前に関連ソースファイルをスカウトしなければならない（コード認識型ディスカッション）
+- REQ-DISC-08: USER-PROFILE.md が非技術的なオーナーを示す場合（learning_style: guided、frustration_triggers にジャーゴン、または高レベルの説明深度）、システムはグレーエリアの言語を製品アウトカム用語に適応しなければならない
+- REQ-DISC-09: REQ-DISC-08 が適用される場合、advisor_research の根拠段落は平易な言語で書き直されなければならない — 同じ決定、翻訳されたフレーミング
 
 **生成物:** `{padded_phase}-CONTEXT.md` — リサーチとプランニングに反映されるユーザーの要望
 
@@ -337,6 +400,7 @@
 - REQ-SHIP-03: システムは SUMMARY.md、VERIFICATION.md、REQUIREMENTS.md から PR 本文を自動生成しなければならない
 - REQ-SHIP-04: システムは STATE.md をシッピングステータスと PR 番号で更新しなければならない
 - REQ-SHIP-05: システムはドラフト PR のための `--draft` フラグをサポートしなければならない
+- REQ-SHIP-06: システムは `ship.pr_body_sections` で設定された追記専用プロジェクト PR ボディセクションをサポートしなければならない
 
 **前提条件:** フェーズ検証済み、`gh` CLI がインストール・認証済み、フィーチャーブランチで作業中
 
@@ -718,7 +782,7 @@
 
 **コマンド:** `/gsd-map-codebase [area]`
 
-**目的:** 新しいプロジェクトを開始する前に既存のコードベースを分析し、GSD が既存の構成を理解できるようにします。
+**目的:** 新しいプロジェクトを開始する前、または `/gsd-onboard` からのマッピングハンドオフとして既存のコードベースを分析し、GSD が既存の構成を理解できるようにします。
 
 **要件:**
 - REQ-MAP-01: システムは各分析領域に対して並列マッパーエージェントを起動しなければならない
@@ -737,6 +801,57 @@
 | `STRUCTURE.md` | ディレクトリレイアウトとファイル構成 |
 | `TESTING.md` | テストインフラ、カバレッジ、パターン |
 | `INTEGRATIONS.md` | 外部サービス、API、サードパーティ依存関係 |
+
+**増分リマップ — `--paths` (#2003):** マッパーはオプションの
+`--paths <p1,p2,...>` スコープヒントを受け付けます。指定した場合、ツリー全体をスキャンする代わりに、リストされたリポジトリ相対プレフィックスに探索を制限します。
+これはフェーズが実際に変更したサブツリーのみを更新するために、実行後コードベースドリフトゲートが使用するパスウェイです。各生成ドキュメントはその YAML フロントマターに `last_mapped_commit` を持ち、ドリフトを HEAD ではなくマッピング時点と照らし合わせて計測できます。
+
+### 27b. 既存コードベースオンボーディング
+
+**コマンド:** `/gsd-onboard [--fast] [--text]`
+
+**目的:** 既存リポジトリの初回セットアップを案内し、brownfield 状態を確認してコードベースマッピング、docs 取り込み、プロジェクト初期化へ安全にハンドオフします。
+
+**要件:**
+- REQ-ONBOARD-01: 既存コード、package manifest、計画ドキュメント、部分的な `.planning/`、コードベースマップの不足を検出する。
+- REQ-ONBOARD-02: 必要な `.planning/codebase/` マップファイルがない brownfield では `/gsd-map-codebase` または `/gsd-map-codebase --fast` へハンドオフする。fast マップの readiness は部分的であり、`/gsd-new-project` に十分として扱ってはならない。
+- REQ-ONBOARD-03: ADR/PRD/SPEC/RFC 候補があり project がない場合、`/gsd-new-project` の前に `/gsd-ingest-docs` を提示する。
+- REQ-ONBOARD-04: `PROJECT.md`、`REQUIREMENTS.md`、`ROADMAP.md`、`STATE.md` が揃うまで完了扱いにしない。
+- REQ-ONBOARD-05: project setup 後にのみ `.planning/onboarding/SUMMARY.md` を作成または確認する。
+- REQ-ONBOARD-06: 対話型メニューがない runtime 向けに、`--text` で番号付きプレーンテキスト gate をサポートする。
+
+**生成物:**
+| Artifact | 説明 |
+|----------|-------------|
+| `.planning/codebase/` | `/gsd-map-codebase` handoff が生成するコードベースマップ |
+| `.planning/PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md` | `/gsd-new-project` または `/gsd-ingest-docs` が生成する planning setup |
+| `.planning/onboarding/SUMMARY.md` | Onboarding status、artifact index、next-command summary |
+
+### 27a. 実行後コードベースドリフト検出
+
+**導入:** #2003
+**トリガー:** すべての `/gsd-execute-phase` 終了時に自動実行
+**設定:**
+- `workflow.drift_threshold`（整数、デフォルト `3`）— ゲートが動作するまでに必要な最小新規構造要素数。
+- `workflow.drift_action`（`warn` | `auto-remap`、デフォルト `warn`）—
+  警告のみ、または影響を受けたサブツリーにスコープした `--paths` で `gsd-codebase-mapper` をスポーン。
+
+**ドリフトとしてカウントされるもの:**
+- マッピングされたパス外の新規ディレクトリ
+- `(packages|apps)/*/src/index.*` の新規バレルエクスポート
+- 新規マイグレーションファイル（supabase/prisma/drizzle/src/migrations/…）
+- `routes/` または `api/` 下の新規ルートモジュール
+
+**非ブロッキング保証:** 内部障害（STRUCTURE.md の欠如、git エラー、マッパースポーン失敗）は
+1 行をログに記録し、フェーズは継続します。ドリフト検出が検証を失敗させることはありません。
+
+**要件:**
+- REQ-DRIFT-01: システムは `git diff --name-status last_mapped_commit..HEAD` から 4 つのドリフトカテゴリを検出しなければならない
+- REQ-DRIFT-02: アクションは要素数が `workflow.drift_threshold` 以上の場合のみ発動する
+- REQ-DRIFT-03: `warn` アクションはエージェントをスポーンしてはならない
+- REQ-DRIFT-04: `auto-remap` アクションはサニタイズされた `--paths` をマッパーに渡さなければならない
+- REQ-DRIFT-05: 検出/リマップの失敗は `/gsd-execute-phase` に対して非ブロッキングでなければならない
+- REQ-DRIFT-06: `last_mapped_commit` は各 `.planning/codebase/*.md` ファイルの YAML フロントマターを通じてラウンドトリップしなければならない
 
 ---
 
@@ -927,6 +1042,7 @@ fix(03-01): correct auth token expiry
 - REQ-HOOK-05: すべてのフックは3秒の stdin タイムアウトガードを含まなければならない
 - REQ-HOOK-06: すべてのフックはエラー時にサイレントに失敗しなければならない
 - REQ-HOOK-07: コンテキスト使用量は autocompact バッファ（16.5% リザーブ）に対して正規化されなければならない
+- REQ-HOOK-08: アップデートバナーはオプトインであり、アップデートが利用可能でない限りサイレントでなければならない（PR #2795）
 
 **ステータスライン表示:**
 ```
@@ -1047,9 +1163,9 @@ fix(03-01): correct auth token expiry
 
 ### 42. クロス AI ピアレビュー
 
-**コマンド:** `/gsd-review --phase N [--gemini] [--claude] [--codex] [--coderabbit] [--opencode] [--qwen] [--cursor] [--all]`
+**コマンド:** `/gsd-review --phase N [--gemini] [--claude] [--codex] [--coderabbit] [--opencode] [--qwen] [--cursor] [--agy] [--all]`
 
-**目的:** 外部の AI CLI（Gemini、Claude、Codex、CodeRabbit、OpenCode、Qwen Code、Cursor）を呼び出して、フェーズプランを独立してレビューします。レビュアーごとのフィードバックを含む構造化された REVIEWS.md を生成します。
+**目的:** 外部の AI CLI（Gemini、Claude、Codex、CodeRabbit、OpenCode、Qwen Code、Cursor、Antigravity）を呼び出して、フェーズプランを独立してレビューします。レビュアーごとのフィードバックを含む構造化された REVIEWS.md を生成します。
 
 **要件:**
 - REQ-REVIEW-01: システムはシステム上で利用可能な AI CLI を検出しなければならない
@@ -1133,7 +1249,7 @@ fix(03-01): correct auth token expiry
 **3. ワークフローガードフック**（`gsd-workflow-guard.js`）
 Claude が GSD ワークフローコンテキスト外でファイル編集を試行した際に検出する PreToolUse フック。直接編集の代わりに `/gsd-quick` や `/gsd-fast` の使用をアドバイスします。`hooks.workflow_guard`（デフォルト: false）で設定可能です。
 
-**4. CI 対応インジェクションスキャナー**（`prompt-injection-scan.test.cjs`）
+**4. CI 対応インジェクションスキャナー**（`prompt-injection-scan.security.test.cjs`）
 すべてのエージェント、ワークフロー、コマンドファイルに埋め込まれたインジェクションベクターをスキャンするテストスイート。
 
 **要件:**
@@ -1308,7 +1424,7 @@ Claude が GSD ワークフローコンテキスト外でファイル編集を�
 
 ### 55. マルチランタイムインストーラー選択
 
-**対象:** `npx get-shit-done-cc`
+**対象:** `npx @opengsd/gsd-core`
 
 **目的:** 1回のインタラクティブなインストールセッションで複数のランタイムを選択します。
 
@@ -1327,7 +1443,7 @@ Claude が GSD ワークフローコンテキスト外でファイル編集を�
 
 ### 56. Windsurf ランタイムサポート
 
-**対象:** `npx get-shit-done-cc`
+**対象:** `npx @opengsd/gsd-core`
 
 **目的:** Windsurf AI IDE のサポートを追加します。
 
@@ -1355,26 +1471,6 @@ Claude が GSD ワークフローコンテキスト外でファイル編集を�
 **プロセス:**
 1. **翻訳** — コアドキュメントを対象言語に変換
 2. **公開** — 翻訳されたドキュメントを英語版と並んでアクセス可能にする
-
----
-
-## v1.30 の機能
-
-### 58. GSD SDK
-
-**コマンド:** プログラマティック API（ヘッドレス）
-
-**目的:** CLI セッションなしでプログラムから GSD ワークフローを実行するためのヘッドレス TypeScript SDK。
-
-**要件:**
-- REQ-SDK-01: SDK は GSD ワークフロー操作を TypeScript 関数として公開しなければならない
-- REQ-SDK-02: SDK はインタラクティブプロンプトなしのヘッドレス実行をサポートしなければならない
-- REQ-SDK-03: SDK は CLI 駆動ワークフローと同一のアーティファクトを生成しなければならない
-
-**プロセス:**
-1. **インポート** — GSD SDK を TypeScript/JavaScript プロジェクトにインポート
-2. **設定** — プロジェクトパスとワークフローオプションをプログラムから設定
-3. **実行** — API コールで GSD フェーズ（discuss、plan、execute）を実行
 
 ---
 
@@ -1568,7 +1664,7 @@ Claude が GSD ワークフローコンテキスト外でファイル編集を�
 
 ### 68. Claude Code スキルマイグレーション
 
-**対象:** `npx get-shit-done-cc`
+**対象:** `npx @opengsd/gsd-core`
 
 **目的:** GSD コマンドを Claude Code 2.1.88+ のスキル形式に後方互換性を維持してマイグレーションします。
 
@@ -1680,7 +1776,7 @@ Claude が GSD ワークフローコンテキスト外でファイル編集を�
 
 ### 74. コンテキスト削減
 
-**対象:** GSD SDK プロンプトアセンブリ
+**対象:** プロンプトアセンブリ・パイプライン
 
 **目的:** Markdown 切り詰めとキャッシュフレンドリーなプロンプト順序により、コンテキストプロンプトサイズを削減します。
 
@@ -1688,6 +1784,7 @@ Claude が GSD ワークフローコンテキスト外でファイル編集を�
 - REQ-CTXRED-01: システムはコンテキスト予算内に収まるよう、大きすぎる Markdown アーティファクトを切り詰めなければならない
 - REQ-CTXRED-02: キャッシュフレンドリーなアセンブリのためにプロンプトを順序付けなければならない（安定したプレフィックスを先頭に）
 - REQ-CTXRED-03: 削減は必須情報（見出し、要件、タスク構造）を保持しなければならない
+- REQ-CTXRED-04: スキルの `description:` フィールドは ≤ 100 文字でなければならない；`npm run lint:descriptions` で強制（`scripts/lint-descriptions.cjs` と `tests/skill-frontmatter-contract.test.cjs` 参照）
 
 **プロセス:**
 1. **計測** — ワークフローの総プロンプトサイズを計算
@@ -1831,7 +1928,7 @@ Claude が GSD ワークフローコンテキスト外でファイル編集を�
 
 ### 85. 新規ランタイムサポート (Trae, Cline, Augment Code)
 
-**対象:** `npx get-shit-done-cc`
+**対象:** `npx @opengsd/gsd-core`
 
 **目的:** Trae IDE、Cline、Augment Code ランタイムへの GSD インストールを拡張します。
 
@@ -1839,3 +1936,1077 @@ Claude が GSD ワークフローコンテキスト外でファイル編集を�
 - REQ-TRAE-01: インストーラーは Trae IDE インストールのための `--trae` フラグをサポートしなければならない
 - REQ-CLINE-01: インストーラーは `.clinerules` 設定を通じて Cline をサポートしなければならない
 - REQ-AUGMENT-01: インストーラーはスキル変換と設定管理で Augment Code をサポートしなければならない
+
+---
+
+### 86. 自律モード `--interactive` フラグ
+
+**フラグ:** `/gsd-autonomous --interactive`
+
+**目的:** ディスカスフェーズをインタラクティブ（ユーザーが質問に回答）に保ちながら、プランと実行をバックグラウンドエージェントとしてディスパッチするリーンコンテキスト自律モード。
+
+**要件:**
+- REQ-INTERACT-01: `--interactive` はインタラクティブな質問（自動回答なし）で discuss-phase をメインコンテキスト内でインラインに実行しなければならない
+- REQ-INTERACT-02: `--interactive` はコンテキスト分離のために plan-phase と execute-phase をバックグラウンドエージェントとしてディスパッチしなければならない
+- REQ-INTERACT-03: `--interactive` はパイプラインの並列性を有効にしなければならない — フェーズ N のビルド中にフェーズ N+1 をディスカス
+- REQ-INTERACT-04: メインコンテキストはディスカッション会話のみを蓄積しなければならない（リーンコンテキスト）
+
+**プロセス:**
+1. **インラインディスカス** — メインコンテキストでユーザーインタラクションとともに discuss-phase を実行
+2. **ディスパッチ** — プランと実行を新鮮なコンテキストウィンドウを持つバックグラウンドエージェントに送信
+3. **パイプライン** — バックグラウンドエージェントがフェーズ N をビルドする間、フェーズ N+1 のディスカッションを開始
+
+---
+
+### 87. コミットドキュメントガードフック
+
+**フック:** `gsd-commit-docs.js`
+
+**目的:** `commit_docs` 設定を強制する PreToolUse フックで、`planning.commit_docs` が `false` の場合に `.planning/` ファイルがコミットされることを防止します。
+
+**要件:**
+- REQ-COMMITDOCS-01: フックは `.planning/` ファイルをステージングする git commit コマンドを傍受しなければならない
+- REQ-COMMITDOCS-02: フックは `commit_docs` が `false` の場合に `.planning/` ファイルを含むコミットをブロックしなければならない
+- REQ-COMMITDOCS-03: フックは勧告的でなければならない — `commit_docs` が `true` または不在の場合はブロックしない
+
+---
+
+### 88. コミュニティフックオプトイン
+
+**フック:** `gsd-validate-commit.sh`、`gsd-session-state.sh`、`gsd-phase-boundary.sh`
+
+**目的:** GSD プロジェクト向けのオプションの git およびセッションフックで、設定の `hooks.community: true` の背後にゲートされています。
+
+**要件:**
+- REQ-COMMUNITY-01: すべてのコミュニティフックは `.planning/config.json` の `hooks.community` が `true` でない限りノーオペレーションでなければならない
+- REQ-COMMUNITY-02: `gsd-validate-commit.sh` は git コミットメッセージに Conventional Commits 形式を強制しなければならない
+- REQ-COMMUNITY-03: `gsd-session-state.sh` はセッション状態遷移をトラッキングしなければならない
+- REQ-COMMUNITY-04: `gsd-phase-boundary.sh` はフェーズ境界チェックを強制しなければならない
+
+**設定:**
+| 設定 | 型 | デフォルト | 説明 |
+|------|-----|-----------|------|
+| `hooks.community` | boolean | `false` | コミット検証、セッション状態、フェーズ境界のオプションコミュニティフックを有効化 |
+
+---
+
+## v1.34.0 機能
+
+  - [グローバル学習ストア](#89-グローバル学習ストア)
+  - [クエリ可能コードベースインテリジェンス](#90-クエリ可能コードベースインテリジェンス)
+  - [実行コンテキストプロファイル](#91-実行コンテキストプロファイル)
+  - [ゲート分類法](#92-ゲート分類法)
+  - [コードレビューパイプライン](#93-コードレビューパイプライン)
+  - [ソクラテス的探索](#94-ソクラテス的探索)
+  - [セーフアンドゥ](#95-セーフアンドゥ)
+  - [プランインポート](#96-プランインポート)
+  - [高速コードベーススキャン](#97-高速コードベーススキャン)
+  - [自律監査から修正](#98-自律監査から修正)
+  - [改善されたプロンプトインジェクションスキャナー](#99-改善されたプロンプトインジェクションスキャナー)
+  - [プランフェーズのストール検出](#100-プランフェーズのストール検出)
+  - [/gsd-progress --next のハードストップ安全ゲート](#101-gsd-progress---next-のハードストップ安全ゲート)
+  - [アダプティブモデルプリセット](#102-アダプティブモデルプリセット)
+  - [ポストマージハンク検証](#103-ポストマージハンク検証)
+
+---
+
+### 89. グローバル学習ストア
+
+**コマンド:** フェーズ完了時に自動トリガー；プランナーが消費
+**設定:** `features.global_learnings`
+
+**目的:** セッションを超えてプロジェクトをまたいだ学習をグローバルストアに永続化し、プランナーエージェントがプロジェクト履歴全体のパターンから学習できるようにします（現在のセッションだけでなく）。
+
+**要件:**
+- REQ-LEARN-01: 学習はフェーズ完了時に `.planning/` からグローバルストアに自動コピーされなければならない
+- REQ-LEARN-02: プランナーエージェントはスポーン時にインジェクションを通じて関連する学習を受け取らなければならない
+- REQ-LEARN-03: インジェクションはコンテキストの肥大化を避けるために `learnings.max_inject` でキャップされなければならない
+- REQ-LEARN-04: 機能は `features.global_learnings: true` によるオプトインでなければならない
+
+**設定:**
+| 設定 | 型 | デフォルト | 説明 |
+|------|-----|-----------|------|
+| `features.global_learnings` | boolean | `false` | クロスプロジェクト学習パイプラインを有効化 |
+| `learnings.max_inject` | number | (システムデフォルト) | プランナーにインジェクトされる最大学習エントリ数 |
+
+---
+
+### 90. クエリ可能コードベースインテリジェンス
+
+**コマンド:** `/gsd-map-codebase --query [<term>|status|diff|refresh]`
+**設定:** `intel.enabled`
+
+**目的:** コードベース構造、API サーフェス、依存関係グラフ、ファイルロール、アーキテクチャ決定のクエリ可能な JSON インデックスを `.planning/intel/` に維持します。コードベース全体を読み込まずにターゲット検索を可能にします。
+
+**要件:**
+- REQ-INTEL-01: インテルファイルは `.planning/intel/` に JSON として保存されなければならない
+- REQ-INTEL-02: `query` モードはすべてのインテルファイルをまたいで用語を検索し、ファイルごとに結果をグループ化しなければならない
+- REQ-INTEL-03: `status` モードは鮮度を報告しなければならない（FRESH/STALE、古さの閾値：24 時間）
+- REQ-INTEL-04: `diff` モードは現在のインテル状態を最後のスナップショットと比較しなければならない
+- REQ-INTEL-05: `refresh` モードはすべてのファイルを再構築するために intel-updater エージェントをスポーンしなければならない
+- REQ-INTEL-06: 機能は `intel.enabled: true` によるオプトインでなければならない
+
+**生成されるインテルファイル:**
+| ファイル | 内容 |
+|---------|------|
+| `stack.json` | テクノロジースタックと依存関係 |
+| `api-map.json` | エクスポートされた関数と API サーフェス |
+| `dependency-graph.json` | モジュール間の依存関係 |
+| `file-roles.json` | 各ソースファイルのロール分類 |
+| `arch-decisions.json` | 検出されたアーキテクチャ決定 |
+
+---
+
+### 91. 実行コンテキストプロファイル
+
+**設定:** `context_profile`
+
+**目的:** 特定の作業タイプに合わせて調整されたあらかじめ設定された実行コンテキスト（モード、モデル、ワークフロー設定）を選択します（個別設定を手動で調整せずに）。
+
+**要件:**
+- REQ-CTX-01: `dev` プロファイルは反復開発に最適化しなければならない（balanced モデル、plan_check 有効）
+- REQ-CTX-02: `research` プロファイルはリサーチ重視の作業に最適化しなければならない（高いモデルティア、research 有効）
+- REQ-CTX-03: `review` プロファイルはコードレビュー作業に最適化しなければならない（verifier と code_review 有効）
+
+**利用可能なプロファイル:** `dev`、`research`、`review`
+
+**設定:**
+| 設定 | 型 | デフォルト | 説明 |
+|------|-----|-----------|------|
+| `context_profile` | string | (なし) | 実行コンテキストプリセット：`dev`、`research`、または `review` |
+
+---
+
+### 92. ゲート分類法
+
+**参照:** `get-shit-done/references/gates.md`
+**エージェント:** plan-checker、verifier
+
+**目的:** すべてのワークフロー決定ポイントを構造化する 4 つの正規ゲートタイプを定義し、plan-checker と verifier エージェントが一貫したゲートロジックを適用できるようにします。
+
+**ゲートタイプ:**
+| タイプ | 説明 |
+|--------|------|
+| **確認** | ユーザーが進行前に承認（例：ロードマップレビュー） |
+| **品質** | 自動化された品質チェックが通過しなければならない（例：プラン検証ループ） |
+| **安全** | 検出されたリスクまたはポリシー違反でのハードストップ |
+| **遷移** | フェーズまたはマイルストーン境界の確認 |
+
+**要件:**
+- REQ-GATES-01: plan-checker は各チェックポイントを 4 つのゲートタイプのいずれかに分類しなければならない
+- REQ-GATES-02: verifier はゲートタイプに適したゲートロジックを適用しなければならない
+- REQ-GATES-03: ハードストップ安全ゲートは `--auto` フラグでバイパスされてはならない
+
+---
+
+### 93. コードレビューパイプライン
+
+**コマンド:** `/gsd-code-review`、`/gsd-code-review --fix`
+
+**目的:** フェーズ中に変更されたソースファイルの構造化レビューで、各修正をアトミックにコミットする別の自動修正パスを伴います。
+
+**要件:**
+- REQ-REVIEW-01: `gsd-code-review` は SUMMARY.md と git diff フォールバックを使用してフェーズにファイルをスコープしなければならない
+- REQ-REVIEW-02: レビューは 3 つの深さレベルをサポートしなければならない：`quick`、`standard`、`deep`
+- REQ-REVIEW-03: 所見は重大度で分類されなければならない：Critical、Warning、Info
+- REQ-REVIEW-04: `gsd-code-review --fix` は REVIEW.md を読み込み、デフォルトで Critical および Warning の所見を修正しなければならない
+- REQ-REVIEW-05: 各修正は説明的なメッセージとともにアトミックにコミットされなければならない
+- REQ-REVIEW-06: `--auto` フラグは修正と再レビューの反復ループを有効にしなければならない（最大 3 回）
+- REQ-REVIEW-07: 機能は `workflow.code_review` 設定フラグでゲートされなければならない
+
+**設定:**
+| 設定 | 型 | デフォルト | 説明 |
+|------|-----|-----------|------|
+| `workflow.code_review` | boolean | `true` | コードレビューコマンドを有効化 |
+| `workflow.code_review_depth` | string | `standard` | デフォルトのレビュー深度：`quick`、`standard`、または `deep` |
+
+---
+
+### 94. ソクラテス的探索
+
+**コマンド:** `/gsd-explore [topic]`
+
+**目的:** プランにコミットする前にソクラテス的な問いかけを通じてアイデアの探索を開発者にガイドします。出力を適切な GSD アーティファクトにルーティングします：ノート、TODO、シード、リサーチクエスチョン、要件更新、または新規フェーズ。
+
+**要件:**
+- REQ-EXPLORE-01: 探索はソクラテス的な問いかけを使用しなければならない — ソリューションを提案する前に質問する
+- REQ-EXPLORE-02: セッションは出力を適切な GSD アーティファクトにルーティングするオプションを提供しなければならない
+- REQ-EXPLORE-03: オプションのトピック引数は最初の質問をプライムしなければならない
+- REQ-EXPLORE-04: 探索はオプションで技術的実現可能性のためにリサーチエージェントをスポーンしなければならない
+
+---
+
+### 95. セーフアンドゥ
+
+**コマンド:** `/gsd-undo --last N | --phase NN | --plan NN-MM`
+
+**目的:** フェーズマニフェストと git log を使用して GSD フェーズまたはプランのコミットを安全にロールバックし、依存関係チェックとリバート適用前のハード確認ゲートを伴います。
+
+**要件:**
+- REQ-UNDO-01: `--phase` モードはマニフェストと git log フォールバックを通じてフェーズのすべてのコミットを識別しなければならない
+- REQ-UNDO-02: `--plan` モードは特定のプランのすべてのコミットを識別しなければならない
+- REQ-UNDO-03: `--last N` モードはインタラクティブな選択のために最近の GSD コミットを表示しなければならない
+- REQ-UNDO-04: システムはリバート前に依存するフェーズ/プランをチェックしなければならない
+- REQ-UNDO-05: git revert が実行される前に確認ゲートを表示しなければならない
+
+---
+
+### 96. プランインポート
+
+**コマンド:** `/gsd-import --from <filepath>`
+
+**目的:** 外部プランファイルを `PROJECT.md` 決定との競合検出とともに GSD プランニングシステムに取り込み、有効な GSD PLAN.md に変換して plan-checker で検証します。
+
+**要件:**
+- REQ-IMPORT-01: インポーターは外部プランと既存の PROJECT.md 決定間の競合を検出しなければならない
+- REQ-IMPORT-02: 検出されたすべての競合は書き込み前にユーザーに提示されなければならない
+- REQ-IMPORT-03: インポートされたプランは有効な GSD PLAN.md 形式として書き込まれなければならない
+- REQ-IMPORT-04: 書き込まれたプランは `gsd-plan-checker` 検証を通過しなければならない
+
+---
+
+### 97. 高速コードベーススキャン
+
+**コマンド:** `/gsd-map-codebase --fast [--focus tech|arch|quality|concerns]`
+
+**目的:** 1 つまたは 2 つの組み合わせたフォーカスエリアに対して単一のマッパーエージェントをスポーンする `/gsd-map-codebase` の軽量な代替手段で、4 つの並列エージェントのオーバーヘッドなしに `.planning/codebase/` にターゲット出力を生成します。
+
+**要件:**
+- REQ-SCAN-01: スキャンは（4 つの並列エージェントではなく）正確に 1 つのマッパーエージェントをスポーンしなければならない
+- REQ-SCAN-02: フォーカスエリアは次のいずれかでなければならない：`tech`、`arch`、`quality`、`concerns`、または組み合わせた `tech+arch` 省略形（デフォルト：`tech+arch`）；組み合わせフォーカスは 1 回のパスで両エリアをカバーする単一エージェントとして実行
+- REQ-SCAN-03: 出力は `/gsd-map-codebase` と同じ形式で `.planning/codebase/` に書き込まれなければならない
+
+---
+
+### 98. 自律監査から修正
+
+**コマンド:** `/gsd-audit-fix [--source <audit>] [--severity high|medium|all] [--max N] [--dry-run]`
+
+**目的:** 監査を実行し、所見を自動修正可能と手動のみに分類し、テスト検証とアトミックコミットで自動修正可能な問題を自律的に修正するエンドツーエンドパイプライン。
+
+**要件:**
+- REQ-AUDITFIX-01: 所見は変更前に自動修正可能または手動のみとして分類されなければならない
+- REQ-AUDITFIX-02: 各修正はコミット前にテストで検証されなければならない
+- REQ-AUDITFIX-03: 各修正はアトミックにコミットされなければならない
+- REQ-AUDITFIX-04: `--dry-run` は修正を適用せずに分類テーブルを表示しなければならない
+- REQ-AUDITFIX-05: `--max N` は 1 回の実行で適用される修正数を制限しなければならない（デフォルト：5）
+
+---
+
+### 99. 改善されたプロンプトインジェクションスキャナー
+
+**フック:** `gsd-prompt-guard.js`、`gsd-read-injection-scanner.js`
+**スクリプト:** `scripts/prompt-injection-scan.sh`、`scripts/base64-scan.sh`
+
+**目的:** プランニングアーティファクトおよび取り込んだコンテンツ内のプロンプトインジェクション試行の多層防御検出。ライブフックはフック独立性のために独自のパターンサブセットをインライン化します（`security.cts` からインポートしません）。CIスキャナー（`security.cts` の `scanForInjection`）は、テストでのコードベース全体スキャン用の集中エンジンを提供します。
+
+**要件:**
+- REQ-SCAN-INJ-01: ライブフックは不可視 Unicode 文字（ゼロ幅スペース、ソフトハイフン、Unicode タグブロック U+E0000–E007F）を検出しなければならない
+- REQ-SCAN-INJ-02: ライブフックは既知のインジェクションパターン（命令オーバーライド、ロール操作、システムプロンプト抽出、偽のメッセージ境界）を検出しなければならない。Base64 デコードスキャンは CI 時制御（`scripts/base64-scan.sh`）であり、ライブフックではない — ライブフックは base64 持ち出しフレーズ正規表現のみを一致させ、デコードはしない。
+- REQ-SCAN-INJ-03: ~~スキャナーはエントロピー分析を適用しなければならない~~ — エントロピー分析（`scanEntropyAnomalies`）は #2198 でデッドコードとして削除された（本番呼び出し元ゼロ；ライブフックはエントロピー分析を実行しない）。この要件は保守可能なライブ実装まで保留。
+- REQ-SCAN-INJ-04: スキャナーは勧告的のみでなければならない — 検出はログに記録されるが、ブロッキングではない
+
+---
+
+### 100. プランフェーズのストール検出
+
+**コマンド:** `/gsd-plan-phase`
+
+**目的:** プランナーの修正ループが停止した（複数のイテレーションにわたって同じ出力を生成している）ことを検出し、異なる戦略にエスカレートするか明確な診断で終了してサイクルを破ります。
+
+**要件:**
+- REQ-STALL-01: 修正ループは連続するイテレーション全体で同一のプラン出力を検出しなければならない
+- REQ-STALL-02: ストール検出時、システムは再試行前に戦略をエスカレートしなければならない
+- REQ-STALL-03: 最大ストール再試行数は制限されなければならない（既存の最大 3 イテレーションでキャップ）
+
+---
+
+### 101. /gsd-progress --next のハードストップ安全ゲート
+
+**コマンド:** `/gsd-progress --next`
+
+**目的:** 繰り返し同一ステップが検出された場合に自律チェーニングを中断するハードストップ安全ゲートと連続呼び出しガードを追加し、`/gsd-progress --next` の暴走ループを防止します。
+
+**要件:**
+- REQ-NEXT-GATE-01: `/gsd-progress --next` は連続した同一ステップ呼び出しをトラッキングしなければならない
+- REQ-NEXT-GATE-02: 同一ステップの繰り返し時、システムはユーザーにハードストップゲートを提示しなければならない
+- REQ-NEXT-GATE-03: ユーザーはハードストップゲートを通過して続行するために明示的に確認しなければならない
+
+---
+
+### 102. アダプティブモデルプリセット
+
+**設定:** `model_profile: "adaptive"`
+
+**目的:** すべてのエージェントに単一のティアを適用するのではなく、現在のエージェントのロールに基づいて適切なモデルティアを自動的に選択するロールベースのモデル割り当て。
+
+**要件:**
+- REQ-ADAPTIVE-01: `adaptive` プリセットはエージェントロールに基づいてモデルティアを割り当てなければならない（planner → quality ティア、executor → balanced ティアなど）
+- REQ-ADAPTIVE-02: `adaptive` は `/gsd-config --profile adaptive` で選択可能でなければならない
+
+---
+
+### 103. ポストマージハンク検証
+
+**コマンド:** `/gsd-update --reapply`
+
+**目的:** アップデート後のローカルパッチ適用後、すべてのハンクが実際に適用されたことを期待されるパッチ内容とライブファイルシステムを比較することで検証します。不完全なマージをサイレントに受け入れるのではなく、ドロップされたまたは部分的なハンクを即座に表示します。
+
+**要件:**
+- REQ-PATCH-VERIFY-01: reapply-patches はマージ後に各ハンクが適用されたことを検証しなければならない
+- REQ-PATCH-VERIFY-02: ドロップされたまたは部分的なハンクはファイルと行のコンテキストとともにユーザーに報告されなければならない
+- REQ-PATCH-VERIFY-03: 検証はパッチごとではなく、すべてのパッチが適用された後に実行されなければならない
+
+---
+
+## v1.35.0 機能
+
+- [新規ランタイムサポート (Cline, CodeBuddy, Qwen Code)](#104-新規ランタイムサポート-cline-codebuddy-qwen-code)
+- [GSD-2 逆マイグレーション](#105-gsd-2-逆マイグレーション)
+- [AI 統合フェーズウィザード](#106-ai-統合フェーズウィザード)
+- [AI 評価レビュー](#107-ai-評価レビュー)
+
+---
+
+### 104. 新規ランタイムサポート (Cline, CodeBuddy, Qwen Code)
+
+**対象:** `npx @opengsd/gsd-core`
+
+**目的:** Cline、CodeBuddy、Qwen Code ランタイムへの GSD インストールを拡張します。
+
+**要件:**
+- REQ-CLINE-02: Cline インストールは `.clinerules` を `~/.cline/`（グローバル）または `./.cline/`（ローカル）に書き込まなければならない。カスタムスラッシュコマンドなし — ルールベースの統合のみ。フラグ：`--cline`。
+- REQ-CODEBUDDY-01: CodeBuddy インストールはスキルを `~/.codebuddy/skills/gsd-*/SKILL.md` にデプロイしなければならない。フラグ：`--codebuddy`。
+- REQ-QWEN-01: Qwen Code インストールはスキルを `~/.qwen/skills/gsd-*/SKILL.md` にデプロイしなければならない（Claude Code 2.1.88+ で使用されるオープン標準に従う）。`QWEN_CONFIG_DIR` 環境変数はデフォルトパスをオーバーライドします。フラグ：`--qwen`。
+
+**ランタイムサマリー:**
+
+| ランタイム | インストール形式 | 設定パス | フラグ |
+|-----------|----------------|---------|-------|
+| Cline | `.clinerules` | `~/.cline/` または `./.cline/` | `--cline` |
+| CodeBuddy | スキル (`SKILL.md`) | `~/.codebuddy/skills/` | `--codebuddy` |
+| Qwen Code | スキル (`SKILL.md`) | `~/.qwen/skills/` | `--qwen` |
+
+---
+
+### 105. GSD-2 逆マイグレーション
+
+**コマンド:** `/gsd-import --from-gsd2 [--dry-run] [--force] [--path <dir>]`
+
+**目的:** GSD-2 形式（Milestone→Slice→Task 階層の `.gsd/` ディレクトリ）のプロジェクトを v1 の `.planning/` 形式に移行し、すべての GSD v1 コマンドとの完全な互換性を復元します。
+
+**要件:**
+- REQ-FROM-GSD2-01: インポーターは指定または現在のディレクトリから `.gsd/` を読み込まなければならない
+- REQ-FROM-GSD2-02: Milestone→Slice 階層は連続したフェーズ番号に平坦化されなければならない（M001/S01→フェーズ 01、M001/S02→フェーズ 02、M002/S01→フェーズ 03 など）
+- REQ-FROM-GSD2-03: `--force` なしに既存の `.planning/` ディレクトリを上書きしないよう保護しなければならない
+- REQ-FROM-GSD2-04: `--dry-run` はファイルを書き込まずにすべての変更をプレビューしなければならない
+- REQ-FROM-GSD2-05: マイグレーションは `PROJECT.md`、`REQUIREMENTS.md`、`ROADMAP.md`、`STATE.md`、および連続したフェーズディレクトリを生成しなければならない
+
+**フラグ:**
+
+| フラグ | 説明 |
+|-------|------|
+| `--dry-run` | ファイルを書き込まずにマイグレーション出力をプレビュー |
+| `--force` | 既存の `.planning/` ディレクトリを上書き |
+| `--path <dir>` | GSD-2 ルートディレクトリを指定 |
+
+---
+
+### 106. AI 統合フェーズウィザード
+
+**コマンド:** `/gsd-ai-integration-phase [N]`
+
+**目的:** プロジェクトフェーズで AI/LLM 機能の選択、統合、評価計画を開発者にガイドします。プランニングと検証に組み込まれる構造化された `AI-SPEC.md` を生成します。
+
+**要件:**
+- REQ-AISPEC-01: ウィザードはフレームワーク選択、モデル選択、統合アプローチをカバーするインタラクティブな決定マトリックスを提示しなければならない
+- REQ-AISPEC-02: システムはプロジェクトタイプに関連するドメイン固有の失敗モードと評価基準を表示しなければならない
+- REQ-AISPEC-03: システムは 3 つの並列専門家エージェントをスポーンしなければならない：domain-researcher、framework-selector、eval-planner
+- REQ-AISPEC-04: 出力はフレームワーク推奨、実装ガイダンス、評価戦略を含む `{phase}-AI-SPEC.md` を生成しなければならない
+
+**生成物:** フェーズディレクトリ内の `{phase}-AI-SPEC.md`
+
+---
+
+### 107. AI 評価レビュー
+
+**コマンド:** `/gsd-eval-review [N]`
+
+**目的:** 実行された AI フェーズの評価カバレッジを `AI-SPEC.md` プランと照合して遡及的に監査します。フェーズが閉じられる前に計画済みと実装済みの評価間のギャップを特定します。
+
+**要件:**
+- REQ-EVALREVIEW-01: レビューは指定されたフェーズから `AI-SPEC.md` を読み込まなければならない
+- REQ-EVALREVIEW-02: 各評価ディメンションは COVERED、PARTIAL、または MISSING としてスコアリングされなければならない
+- REQ-EVALREVIEW-03: 出力は所見、ギャップ説明、および修正ガイダンスを含まなければならない
+- REQ-EVALREVIEW-04: `EVAL-REVIEW.md` はフェーズディレクトリに書き込まれなければならない
+
+**生成物:** スコアリングされた評価ディメンション、ギャップ分析、修正ステップを含む `{phase}-EVAL-REVIEW.md`
+
+---
+
+## v1.36.0 機能
+
+### 108. プランバウンス
+
+**コマンド:** `/gsd-plan-phase N --bounce`
+
+**目的:** プランがチェッカーを通過した後、外部スクリプト（2 番目の AI、リンター、カスタムバリデーター）を通じてオプションで精製します。バウンスステップは各プランをバックアップし、スクリプトを実行し、結果の YAML フロントマターの整合性を検証し、プランチェッカーを再実行し、何か失敗した場合は元に戻します。
+
+**要件:**
+- REQ-BOUNCE-01: `--bounce` フラグまたは `workflow.plan_bounce: true` がステップを有効化；`--skip-bounce` は常に無効化
+- REQ-BOUNCE-02: `workflow.plan_bounce_script` は有効な実行ファイルを指していなければならない；スクリプトが見つからない場合は警告を生成してスキップ
+- REQ-BOUNCE-03: 各プランはスクリプト実行前に `*-PLAN.pre-bounce.md` にバックアップされる
+- REQ-BOUNCE-04: YAML フロントマターが壊れているまたはプランチェッカーが失敗したバウンスされたプランはバックアップから復元される
+- REQ-BOUNCE-05: `workflow.plan_bounce_passes`（デフォルト：2）はスクリプトが受け取る精製パス数を制御する
+
+**設定:** `workflow.plan_bounce`、`workflow.plan_bounce_script`、`workflow.plan_bounce_passes`
+
+---
+
+### 109. 外部コードレビューコマンド
+
+**コマンド:** `/gsd-ship`（強化版）
+
+**目的:** `/gsd-ship` の手動レビューステップの前に、設定されている場合は外部コードレビューコマンドを自動的に実行します。コマンドは stdin を通じて diff とフェーズコンテキストを受け取り、JSON verdict（`APPROVED` または `REVISE`）を返します。結果に関わらず既存の手動レビューフローにフォールスルーします。
+
+**要件:**
+- REQ-EXTREVIEW-01: `workflow.code_review_command` はコマンド文字列に設定されなければならない；null はスキップを意味する
+- REQ-EXTREVIEW-02: diff は `--stat` サマリーを含めて `BASE_BRANCH` に対して生成される
+- REQ-EXTREVIEW-03: レビュープロンプトは stdin を通じてパイプされる（シェルインターポレートされない）
+- REQ-EXTREVIEW-04: 120 秒タイムアウト；失敗時に stderr をキャプチャ
+- REQ-EXTREVIEW-05: `verdict`、`confidence`、`summary`、`issues` フィールドの JSON 出力をパース
+
+**設定:** `workflow.code_review_command`
+
+---
+
+### 110. クロス AI 実行デリゲーション
+
+**コマンド:** `/gsd-execute-phase N --cross-ai`
+
+**目的:** 個々のプランを実行のために外部 AI ランタイムにデリゲートします。フロントマターに `cross_ai: true` があるプラン（または `--cross-ai` 使用時はすべてのプラン）が stdin を通じて設定済みコマンドに送信されます。正常に処理されたプランは通常の executor キューから削除されます。
+
+**要件:**
+- REQ-CROSSAI-01: `--cross-ai` はすべてのプランをクロス AI に強制；`--no-cross-ai` は無効化
+- REQ-CROSSAI-02: `workflow.cross_ai_execution: true` とプランフロントマター `cross_ai: true` がプランごとのアクティベーションに必要
+- REQ-CROSSAI-03: タスクプロンプトはインジェクションを防ぐために stdin を通じてパイプされる
+- REQ-CROSSAI-04: ダーティなワーキングツリーは実行前に警告を生成する
+- REQ-CROSSAI-05: 失敗時、ユーザーは選択する：再試行、スキップ（通常の executor にフォールバック）、またはアボート
+
+**設定:** `workflow.cross_ai_execution`、`workflow.cross_ai_command`、`workflow.cross_ai_timeout`
+
+---
+
+### 111. アーキテクチャ責任マッピング
+
+**コマンド:** `/gsd-plan-phase`（強化されたリサーチステップ）
+
+**目的:** フェーズリサーチ中に、phase-researcher が各機能をそのアーキテクチャティアオーナー（ブラウザ、フロントエンドサーバー、API、CDN/スタティック、データベース）にマッピングします。プランナーはこのマップに対してタスクをクロスリファレンスし、plan-checker はディメンション 7c としてティアコンプライアンスを強制します。
+
+**要件:**
+- REQ-ARM-01: Phase researcher は RESEARCH.md にアーキテクチャ責任マップテーブルを生成しなければならない（ステップ 1.5）
+- REQ-ARM-02: プランナーはマップに対してタスクからティアへの割り当てをサニティチェックしなければならない
+- REQ-ARM-03: Plan checker はディメンション 7c としてティアコンプライアンスを検証しなければならない（一般的な不一致は WARNING、セキュリティに敏感なものは BLOCKER）
+
+**生成物:** `{phase}-RESEARCH.md` 内の `## Architectural Responsibility Map` セクション
+
+---
+
+### 112. 学習の抽出
+
+**コマンド:** `/gsd-extract-learnings N`
+
+**目的:** 完了したフェーズのアーティファクトから構造化された知識を抽出します。PLAN.md と SUMMARY.md（必須）および VERIFICATION.md、UAT.md、STATE.md（オプション）を読み込み、決定、教訓、パターン、驚きの 4 カテゴリの学習を生成します。オプションで `capture_thought` ツールを通じて各項目を外部ナレッジベースにキャプチャします。
+
+**要件:**
+- REQ-LEARN-01: PLAN.md と SUMMARY.md が必要；見つからない場合は明確なエラーで終了
+- REQ-LEARN-02: 各抽出された項目にはソース帰属（アーティファクトとセクション）が含まれる
+- REQ-LEARN-03: `capture_thought` ツールが利用可能な場合、`source`、`project`、`phase` メタデータとともに項目をキャプチャする
+- REQ-LEARN-04: `capture_thought` が利用不可の場合、正常に完了し、外部キャプチャがスキップされたことをログに記録する
+- REQ-LEARN-05: 2 回実行すると前の `LEARNINGS.md` が上書きされる
+
+**生成物:** YAML フロントマター（phase、project、カテゴリごとのカウント、missing_artifacts）を含む `{phase}-LEARNINGS.md`
+
+**オプション統合 — `capture_thought`:** `capture_thought` は**バンドルされたツールではなく、規約**です。GSD はそれを同梱せず、必須でもありません。ワークフローは現在のセッションの MCP サーバーが `capture_thought` という名前のツールを公開しているかどうかを確認し、公開している場合は以下のシグネチャで抽出した学習ごとに 1 回呼び出します。そのようなツールが存在しない場合、ステップはサイレントにスキップされ、`LEARNINGS.md` が主要な出力として残ります。
+
+期待されるツールシグネチャ：
+```javascript
+capture_thought({
+  category: "decision" | "lesson" | "pattern" | "surprise",
+  phase: <phase_number>,
+  content: <learning_text>,
+  source: <artifact_name>
+})
+```
+
+メモリ / ナレッジベース MCP サーバー（例：ExoCortex スタイルのサーバー、`claude-mem`、または `mem0` スタイルのサーバー）を実行するユーザーは、このツール名を実装して、`project`、`phase`、`source` メタデータとともに学習を自動的にナレッジベースにルーティングできます。それ以外のユーザーは追加のセットアップなしに `/gsd-extract-learnings` を使用できます — `LEARNINGS.md` アーティファクトが機能です。
+
+---
+
+### 114. コンテキストウィンドウ対応プロンプト薄化
+
+**目的:** 200K トークン未満のコンテキストウィンドウを持つモデルのスタティックプロンプトオーバーヘッドを最大 40% 削減します。拡張例とアンチパターンリストがエージェント定義から `@` required_reading を通じてオンデマンドで読み込まれる参照ファイルに抽出されます。
+
+**要件:**
+- REQ-THIN-01: `CONTEXT_WINDOW < 200000` の場合、executor と planner のエージェントプロンプトはインライン例を省略する
+- REQ-THIN-02: 抽出されたコンテンツは `references/executor-examples.md` と `references/planner-antipatterns.md` に存在する
+- REQ-THIN-03: 標準（200K-500K）と拡張（500K+）ティアは影響を受けない
+- REQ-THIN-04: コアルールと決定ロジックはインラインのまま；詳細な例のみが抽出される
+
+**参照ファイル:** `executor-examples.md`、`planner-antipatterns.md`
+
+---
+
+### 115. 設定可能な CLAUDE.md パス
+
+**目的:** プロジェクトが CLAUDE.md をルート以外の場所に保存できるようにします。`claude_md_path` 設定キーは `/gsd-profile-user` および関連コマンドが生成された CLAUDE.md ファイルを書き込む場所を制御します。
+
+**要件:**
+- REQ-CMDPATH-01: `claude_md_path` はデフォルトで `./CLAUDE.md`
+- REQ-CMDPATH-02: プロファイル生成コマンドは設定からパスを読み込み、指定された場所に書き込む
+- REQ-CMDPATH-03: 相対パスはプロジェクトルートから解決される
+
+**設定:** `claude_md_path`
+
+---
+
+### 116. TDD パイプラインモード
+
+**目的:** オプトインの TDD（レッドグリーンリファクタリング）をファーストクラスのフェーズ実行モードとして提供します。有効にすると、プランナーは適切なタスクに対して積極的に `type: tdd` を選択し、executor は RED/GREEN/REFACTOR ゲートシーケンスを強制し、RED 前の予期しない GREEN でフェイルファストします。
+
+**要件:**
+- REQ-TDD-01: `workflow.tdd_mode` 設定キー（boolean、デフォルト `false`）
+- REQ-TDD-02: 有効時、プランナーは `references/tdd.md` の TDD ヒューリスティックをすべての適格なタスク（ビジネスロジック、API、バリデーション、アルゴリズム、ステートマシン）に適用する
+- REQ-TDD-03: Executor は `type: tdd` プランのゲートシーケンスを強制する — RED コミット（`test(...)`）は GREEN コミット（`feat(...)`）より先でなければならない
+- REQ-TDD-04: Executor は RED フェーズ中にテストが予期しなくパスした場合にフェイルファストする（機能がすでに存在するかテストが間違っている）
+- REQ-TDD-05: フェーズ終了時の協調レビューチェックポイントがすべての TDD プランにわたるゲートコンプライアンスを確認する（勧告的、非ブロッキング）
+- REQ-TDD-06: ゲート違反は SUMMARY.md の `## TDD Gate Compliance` セクション下に表示される
+
+**設定:** `workflow.tdd_mode`
+**参照ファイル:** `tdd.md`、`checkpoints.md`
+
+---
+
+## v1.37.0 機能
+
+### 117. スパイクコマンド
+
+**コマンド:** `/gsd-spike [idea] [--quick]`
+
+**目的:** 実装アプローチにコミットする前に 2〜5 つの焦点を絞った実現可能性実験を実行します。各実験は Given/When/Then フレーミングを使用し、実行可能なコードを生成し、VALIDATED / INVALIDATED / PARTIAL verdict を返します。コンパニオンの `/gsd-spike --wrap-up` は所見をプロジェクトローカルのスキルにパッケージ化します。
+
+**要件:**
+- REQ-SPIKE-01: 各実験はコードが書かれる前に Given/When/Then 仮説を生成しなければならない
+- REQ-SPIKE-02: 各実験は動作するコードまたは最小限の再現を含まなければならない
+- REQ-SPIKE-03: 各実験はエビデンスとともに VALIDATED、INVALIDATED、または PARTIAL verdict のいずれかを返さなければならない
+- REQ-SPIKE-04: 結果は `.planning/spikes/NNN-experiment-name/` に README と MANIFEST.md とともに保存されなければならない
+- REQ-SPIKE-05: `--quick` フラグはインテーク会話をスキップし、引数テキストを実験方向として使用する
+- REQ-SPIKE-06: `/gsd-spike --wrap-up` は所見を `.claude/skills/spike-findings-[project]/` にパッケージ化しなければならない
+
+**生成物:**
+
+| アーティファクト | 説明 |
+|---------------|------|
+| `.planning/spikes/NNN-name/README.md` | 仮説、実験コード、verdict、エビデンス |
+| `.planning/spikes/MANIFEST.md` | verdict を含むすべてのスパイクのインデックス |
+| `.claude/skills/spike-findings-[project]/` | パッケージ化された所見（`/gsd-spike --wrap-up` 経由） |
+
+---
+
+### 118. スケッチコマンド
+
+**コマンド:** `/gsd-sketch [idea] [--quick] [--text]`
+
+**目的:** 実装にコミットする前に使い捨ての HTML モックアップを通じてデザイン方向を探索します。デザインの質問ごとに 2〜3 のインタラクティブなバリアントを生成し、ビルドステップなしにブラウザで直接閲覧できます。コンパニオンの `/gsd-sketch --wrap-up` は勝利した決定をプロジェクトローカルのスキルにパッケージ化します。
+
+**要件:**
+- REQ-SKETCH-01: 各スケッチは 1 つの特定のビジュアルデザイン質問に答えなければならない
+- REQ-SKETCH-02: 各スケッチはタブナビゲーションを持つ単一の `index.html` に 2〜3 の意味のある異なるバリアントを含まなければならない
+- REQ-SKETCH-03: すべてのインタラクティブ要素（ホバー、クリック、トランジション）は機能しなければならない
+- REQ-SKETCH-04: スケッチはリアルに近いコンテンツを使用しなければならない（ lorem ipsum ではない）
+- REQ-SKETCH-05: 共有の `themes/default.css` は合意された美観に適応した CSS 変数を提供しなければならない
+- REQ-SKETCH-06: `--quick` フラグはムードインテークをスキップ；`--text` フラグは非 Claude ランタイム用に `AskUserQuestion` を番号付きリストに置き換える
+- REQ-SKETCH-07: 勝利バリアントは README フロントマターと HTML タブの ★ でマークされなければならない
+- REQ-SKETCH-08: `/gsd-sketch --wrap-up` は勝利した決定を `.claude/skills/sketch-findings-[project]/` にパッケージ化しなければならない
+
+**生成物:**
+| アーティファクト | 説明 |
+|---------------|------|
+| `.planning/sketches/NNN-name/index.html` | 2〜3 のインタラクティブ HTML バリアント |
+| `.planning/sketches/NNN-name/README.md` | デザイン質問、バリアント、勝者、注目点 |
+| `.planning/sketches/themes/default.css` | 共有 CSS テーマ変数 |
+| `.planning/sketches/MANIFEST.md` | 勝者を含むすべてのスケッチのインデックス |
+| `.claude/skills/sketch-findings-[project]/` | パッケージ化された決定（`/gsd-sketch --wrap-up` 経由） |
+
+---
+
+### 119. エージェントサイズ予算強制
+
+**目的:** CI で強制される段階的な行数制限でエージェントプロンプトファイルをリーンに保ちます。過大なエージェントは本番のコンテキストウィンドウを肥大化させる前にキャッチされます。
+
+**要件:**
+- REQ-BUDGET-01: `agents/gsd-*.md` ファイルは 3 つのティアに分類される：XL（≤ 1,600 行）、Large（≤ 1,000 行）、Default（≤ 500 行）
+- REQ-BUDGET-02: ティア割り当てはファイルの YAML フロントマターで宣言される（`size: xl | large | default`）
+- REQ-BUDGET-03: `tests/agent-size-budget.test.cjs` は制限を強制し、違反時に CI を失敗させる
+- REQ-BUDGET-04: `size` フロントマターキーのないファイルはデフォルト（500 行）制限にデフォルトする
+
+**テストファイル:** `tests/agent-size-budget.test.cjs`
+
+---
+
+### 120. 共有ボイラープレート抽出
+
+**目的:** 共通の 2 つのボイラープレートブロックをオンデマンドで読み込まれる共有参照ファイルに抽出することでエージェント間の重複を削減します。エージェントファイルをサイズ予算内に保ち、ボイラープレートの更新を単一ファイルの変更にします。
+
+**要件:**
+- REQ-BOILER-01: 必須初期読み込み命令は `references/mandatory-initial-read.md` に抽出される
+- REQ-BOILER-02: プロジェクトスキルディスカバリー命令は `references/project-skills-discovery.md` に抽出される
+- REQ-BOILER-03: 以前これらのブロックをインライン化していたエージェントは `@` required_reading を通じてそれらを参照しなければならない
+
+**参照ファイル:** `references/mandatory-initial-read.md`、`references/project-skills-discovery.md`
+
+---
+
+### 121. ナレッジグラフ統合
+
+**目的:** `.planning/graphs/` にプロジェクトの軽量なナレッジグラフを構築、クエリ、検査します。プロジェクトごとのオプトイン。ユーザー向けコマンドの `/gsd-graphify` とプログラマティックな `gsd-tools.cjs graphify …` 動詞ファミリーとして公開されています。コマンド、エージェント、ワークフロー、フェーズをまたいだノードとエッジのグラフ指向ビューで `/gsd-map-codebase --query`（スナップショット指向）を補完します。
+
+**要件:**
+- REQ-GRAPH-01: `.planning/config.json` の `graphify.enabled: true` によるオプトイン。無効時、`/gsd-graphify` はアクティベーションヒントを表示して書き込みなしで停止。
+- REQ-GRAPH-02: スラッシュコマンド `/gsd-graphify` はサブコマンド `build`、`query <term>`、`status`、`diff` を公開。プログラマティック CLI `node gsd-tools.cjs graphify …` はさらに `snapshot` を公開し、`graphify build` の最終ステップとして自動的に呼び出される。
+- REQ-GRAPH-03: ビルドは設定可能な `graphify.build_timeout`（秒）内で実行；タイムアウトを超えた場合、部分的なグラフを残さずにクリーンに中断。
+- REQ-GRAPH-04: `graphify.cjs` は `graph.edges` が存在しない場合に `graph.links` にフォールバックし、古いグラフアーティファクトが引き続きレンダリングされるようにする。
+- REQ-GRAPH-05: Graphify は `gsd-tools.cjs graphify ...` コマンドハンドラーを通じて呼び出される。
+
+**設定:** `graphify.enabled`、`graphify.build_timeout`
+**参照ファイル:** `commands/gsd/graphify.md`、`bin/lib/graphify.cjs`
+
+---
+
+## v1.40.0 機能
+
+### 122. スキルサーフェス統合
+
+**目的:** 31 のマイクロスキルを 4 つの新しいグループ化された親と、サブ操作をフラグとして吸収する 6 つの既存の親に折りたたんで、積極的なスキルリストのオーバーヘッドを削減します。機能的な損失はゼロ — 削除されたすべてのマイクロスキルの動作は統合された親のフラグを通じて存続します。統合後、`commands/gsd/*.md` は 59 のサブスキル（plus 6 つのネームスペースメタスキル、#123 参照）を搭載。
+
+**要件:**
+- REQ-CONSOLIDATE-01: 4 つの新しいグループ化されたスキルがマイクロスキルのクラスターを置き換える：
+  - `/gsd-capture` — add-todo（デフォルト）、note（`--note`）、add-backlog（`--backlog`）、plant-seed（`--seed`）、check-todos（`--list`）を折りたたむ
+  - `/gsd-phase` — add-phase（デフォルト）、insert-phase（`--insert`）、remove-phase（`--remove`）、edit-phase（`--edit`）を折りたたむ
+  - `/gsd-config` — settings-advanced（`--advanced`）、settings-integrations（`--integrations`）、set-profile（`--profile`）を折りたたむ
+  - `/gsd-workspace` — new-workspace（`--new`）、list-workspaces（`--list`）、remove-workspace（`--remove`）を折りたたむ
+- REQ-CONSOLIDATE-02: 6 つの既存の親がラップアップ/サブ操作をフラグとして吸収：`/gsd-update --sync`、`/gsd-update --reapply`、`/gsd-sketch --wrap-up`、`/gsd-spike --wrap-up`、`/gsd-map-codebase --fast`、`/gsd-map-codebase --query`、`/gsd-code-review --fix`、`/gsd-progress --do`、`/gsd-progress --next`。
+- REQ-CONSOLIDATE-03: 削除されたマイクロスキルスラッシュフォーム（`gsd-add-todo`、`gsd-add-backlog`、`gsd-plant-seed`、`gsd-check-todos`、`gsd-add-phase`、`gsd-insert-phase`、`gsd-remove-phase`、`gsd-edit-phase`、`gsd-new-workspace`、`gsd-list-workspaces`、`gsd-remove-workspace`、`gsd-settings-advanced`、`gsd-settings-integrations`、`gsd-set-profile`、`gsd-sketch-wrap-up`、`gsd-spike-wrap-up`、`gsd-reapply-patches`、`gsd-code-review-fix`、…）は「Unknown command」に解決しなければならない — シャドウスタブなし。
+- REQ-CONSOLIDATE-04: `autonomous.md` は（削除された `gsd-code-review-fix` を以前呼び出していた代わりに）`/gsd-code-review --fix` を呼び出す。
+
+**参照 issue:** [#2790](https://github.com/open-gsd/gsd-core/issues/2790)
+
+---
+
+### 123. ネームスペースメタスキル（2 段階ルーティング）
+
+**目的:** フラットな積極的スキルリストを 2 段階の階層的ルーティングレイヤーに置き換えます。モデルは 86 エントリの代わりに 6 つのネームスペースルーターを認識し、ネームスペースを選択してからサブスキルにルーティングします。説明にはルーティング密度のためにパイプ区切りのキーワードタグ（≤ 60 文字）を使用します。
+
+**コマンド:**
+- `/gsd-workflow` — フェーズパイプラインルーター（discuss / plan / execute / verify / phase / progress）
+- `/gsd-project` — プロジェクトライフサイクル（マイルストーン、監査、サマリー）
+- `/gsd-quality` — 品質ゲート（コードレビュー、デバッグ、監査、セキュリティ、評価、UI）
+- `/gsd-context` — コードベースインテリジェンス（マップ、グラファイファイ、ドキュメント、学習）
+- `/gsd-manage` — 設定 / ワークスペース / ワークストリーム / スレッド / アップデート / シップ / インボックス
+- `/gsd-ideate` — 探索とキャプチャ（探索、スケッチ、スパイク、スペック、キャプチャ）
+
+**トークンコスト:**
+
+| | エントリ数 | 概算トークン |
+|---|---|---|
+| v1.40 以前のフルインストール | 86 | ~2,150 |
+| ネームスペースメタスキル | 6 | ~120 |
+
+**要件:**
+- REQ-NS-01: 6 つの `commands/gsd/ns-*.md` ネームスペースルーターはパイプ区切りのキーワードタグ説明（≤ 60 文字）とともに搭載される。
+- REQ-NS-02: 既存のサブスキルは変更されず、引き続き直接呼び出し可能 — ネームスペーススキルは直接スラッシュフォームの置き換えではなく追加的。
+- REQ-NS-03: 各ネームスペースルーターの本体には、#2790 以後の統合されたサーフェス上の正しい具体的なサブスキルへのユーザーインテントをマッピングするルーティングテーブルが含まれる。
+
+**参照 issue:** [#2792](https://github.com/open-gsd/gsd-core/issues/2792)
+
+---
+
+### 124. コンテキストウィンドウ使用率ガード
+
+**コマンド:** `/gsd-health --context`
+
+**目的:** コンテキストウィンドウの飽和に対する品質ガード。2 つの閾値：60% 使用率で警告（「`/gsd-thread` を検討してください」）、70% でクリティカル（「推論品質が低下する可能性があります」；最近のコンテキストアテンション研究による破断点に一致）。
+
+**要件:**
+- REQ-CTX-GUARD-01: `/gsd-health --context` は現在の使用率、閾値ティア（`ok` / `warn` / `critical`）、修正提案を含む構造化されたステータス行を出力する。
+- REQ-CTX-GUARD-02: 同じトリアージは `gsd-tools.cjs validate context --tokens-used <int> --context-window <int>` として公開されている — ステータス行とフック呼び出し元の構造化エンベロープ（#125）。両フラグは必須；ハンドラーは REQ-CTX-GUARD-03 の純粋な分類器と同じ `{ percent, state }` エンベロープを返す。
+- REQ-CTX-GUARD-03: 分類器（`bin/lib/context-utilization.cjs`）は純粋：入力 `(tokensUsed, contextWindow)`、出力 `{ percent, state }`。ユニットテストが容易で、任意の呼び出し元から再利用しやすい。
+
+**参照 issue:** [#2792](https://github.com/open-gsd/gsd-core/issues/2792)
+
+---
+
+### 125. フェーズライフサイクルステータス行リードサイド
+
+**目的:** ステータス行にフェーズオーケストレーション状態を表示します。`parseStateMd()` は 4 つの新しい STATE.md フロントマターフィールドを読み込み、`formatGsdState()` は実行中、アイドル、および進行状況シーンをレンダリングします。ライトサイドの配線は後の RC で行われます。
+
+**要件:**
+- REQ-LIFECYCLE-01: `parseStateMd()` は 4 つのオプションフィールドを読み込む：
+  - `active_phase` — オーケストレーターが実行中のフェーズ番号
+  - `next_action` — アイドル時の推奨される次のコマンド
+  - `next_phases` — 次のフェーズ番号の YAML フロー配列
+  - `progress` — ネストされた `total_phases` / `completed_phases` / `percent` ブロック
+- REQ-LIFECYCLE-02: `formatGsdState()` はライフサイクルフィールドを優先順位の順にチェックし、最初に一致するシーンを出力する（フェーズアクティブ → アイドル次推奨 → マイルストーン完了 → デフォルトフォールバック）。
+- REQ-LIFECYCLE-03: 4 つのフィールドはすべてデフォルトで undefined；既存の STATE.md ファイルはバイト単位で同一にレンダリングされる。
+
+**参照 issue:** [#2833](https://github.com/open-gsd/gsd-core/issues/2833) — フルフィールドリファレンスとレンダリングルールについては [`docs/STATE-MD-LIFECYCLE.md`](../reference/state-md.md) を参照。
+
+---
+
+## v1.41.0 機能
+
+### 126. フェーズタイプごとのモデル選択
+
+**目的:** フルエージェント分類法を習得せずにフェーズレベル（プランニング、リサーチ、実行、検証）でモデルチューニングを表現します。エージェントごとの `model_overrides`（精密、冗長）とグローバル `model_profile` ティア（粗い、均一）の中間に位置します。
+
+**設定キー:** `.planning/config.json` の `models`
+
+**フェーズタイプスロット:**
+
+| スロット | 割り当てられたエージェント |
+|---------|----------------------|
+| `planning` | `gsd-planner`、`gsd-roadmapper`、`gsd-pattern-mapper` |
+| `discuss` | `gsd-assumptions-analyzer` |
+| `research` | `gsd-phase-researcher`、`gsd-project-researcher`、`gsd-research-synthesizer`、`gsd-codebase-mapper`、`gsd-ui-researcher` |
+| `execution` | `gsd-executor`、`gsd-debugger`、`gsd-doc-writer` |
+| `verification` | `gsd-verifier`、`gsd-plan-checker`、`gsd-integration-checker`、`gsd-nyquist-auditor`、`gsd-ui-checker`、`gsd-ui-auditor`、`gsd-doc-verifier`、`gsd-code-reviewer` |
+| `completion` | （将来のサブエージェント用に予約） |
+
+**受け入れられる値:** `"opus"` / `"sonnet"` / `"haiku"` / `"inherit"`
+
+**解決の優先順位（高→低）:**
+
+```text
+1. model_overrides[<agent>]
+2. dynamic_routing.tier_models[<tier>]   (有効時)
+3. models[<phase_type>]                  (この機能)
+4. model_profile
+5. ランタイムデフォルト
+```
+
+**要件:**
+- REQ-PHASE-MODELS-01: 6 つの名前付き `models.*` スロットが `config-schema.cjs` と `config-schema.ts` に受け入れられる；`config-set` は不明なフェーズタイプを拒否する。
+- REQ-PHASE-MODELS-02: `models` ブロックのない設定は v1.41 以前の動作とバイト単位で同一に動作する。
+- REQ-PHASE-MODELS-03: `discuss` と `completion` は前方互換性のためにスキーマに受け入れられる；今日それらを設定することはサブエージェントが各にマッピングされるまでノーオペレーション。
+
+**参照 issue:** [#3023](https://github.com/open-gsd/gsd-core/pull/3030)
+
+---
+
+### 127. 失敗ティアエスカレーション付き動的ルーティング
+
+**目的:** デフォルトで安価なティアを使用し、オーケストレーターがソフト失敗（検証が決定的でない、プランチェック FLAG など）を検出した場合に自動的により有能なモデルにエスカレートします。
+
+**設定キー:** `.planning/config.json` の `dynamic_routing`
+
+**動作:**
+- `enabled: false`（デフォルト）— 機能はオフ；すべてのエージェントは変更なしに優先順位チェーンを使用。
+- `enabled: true` — リゾルバーは最初のスポーンに `tier_models[default_tier]` を選択し、オーケストレーターが検出したソフト失敗で 1 ティア上にエスカレートし、`max_escalations` でキャップ。
+
+**構成:** `model_overrides` は常に優先；`dynamic_routing.tier_models[<tier>]` は `models.<phase_type>` と `model_profile` より上で解決。
+
+**要件:**
+- REQ-DYNROUTE-01: `dynamic_routing.enabled` はマスタースイッチとして機能；`false` またはブロックが存在しない場合、動作変更はゼロ。
+- REQ-DYNROUTE-02: 新しいリゾルバー `resolveModelForTier(cwd, agent, attempt)`（`core.cjs` 内）はオーケストレーター統合の単一コールサイト。
+- REQ-DYNROUTE-03: `max_escalations` はランナウェイコストを防ぐためにエスカレーションチェーンをキャップ。
+
+**参照 issue:** [#3024](https://github.com/open-gsd/gsd-core/pull/3031)
+
+---
+
+### 128. アップデートバナーオプトイン
+
+**目的:** GSD ステータス行を拒否またはバイパスしたユーザーに、ステータス行を必要とせずにアップデートの可用性を表示します。
+
+**動作:**
+- インストール時、インストーラーが GSD ステータス行を検出しない場合、オプトインの `SessionStart` フックを提供します。
+- フックはステータス行で使用されているのと同じキャッシュ `~/.cache/gsd/gsd-update-check.json` を読み込み、アップデートが利用可能な場合のみバナーを表示します。
+- 最新の場合はサイレント。
+- 障害診断は 24 時間に 1 回に制限。
+- `npx @opengsd/gsd-core --uninstall` によってクリーンに削除。
+
+**要件:**
+- REQ-BANNER-01: バナーは明示的なオプトインなしにインストールされない。
+- REQ-BANNER-02: 追加のネットワークリクエストなし — 既存のバックグラウンドアップデートチェックキャッシュを再利用。
+- REQ-BANNER-03: アンインストールパスはバナーフックを削除する。
+
+**参照 issue:** [#2795](https://github.com/open-gsd/gsd-core/pull/2795)
+
+---
+
+### 129. issue-driven-orchestration ガイド
+
+**目的:** GitHub / Linear / Jira issue から GSD ワークフロー全体を駆動するレシピを文書化し、トラッカー中心の概念を既存の GSD プリミティブにマッピングします。
+
+**ドキュメント:** [`docs/issue-driven-orchestration.md`](../issue-driven-orchestration.md)
+
+**対象ワークフロー:**
+1. issue ごとに分離されたワークスペースを作成（`/gsd-workspace --new`）
+2. マネージャーダッシュボードを実行して全体を把握（`/gsd-manager`）
+3. 自律的に実行（`/gsd-autonomous`）
+4. 検証とレビュー（`/gsd-verify-work`、`/gsd-review`）
+5. シップして issue をクローズ（`/gsd-ship`）
+
+新しいコマンドやデーモンプロセスはなし — 既存のプリミティブをトラッカー駆動ワークフローにマッピングする純粋なドキュメントアーティファクト。
+
+**参照 issue:** [#2840](https://github.com/open-gsd/gsd-core/pull/2840)
+
+---
+
+### 130. グラファイファイコミットベースの古さ検出
+
+**目的:** アーキテクチャグラフが現在のコミットから構築されたか古いコミットから構築されたかを表示し、既存の mtime ベースの古さシグナルを補完します。
+
+**コマンド:** `/gsd-graphify status`
+
+**返される新フィールド（graphify v0.7+ グラフ）:**
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `built_at_commit` | string | グラフが構築されたコミット SHA |
+| `current_commit` | string | 現在の `git HEAD` |
+| `commits_behind` | number | グラフが HEAD から何コミット遅れているか |
+| `commit_stale` | boolean \| null | `true`=古い、`false`=最新、`null`=利用不可（v0.7 以前、非 git） |
+
+**レンダリング出力（シグナルが利用可能な場合）:**
+```
+Source commit: abc1234 (3 commits behind HEAD)
+```
+
+**セキュリティ:** `built_at_commit` は `git` に到達する前に 4〜40 の 16 進文字として検証される — 悪意のある `graph.json` はダッシュオプションを argv にインジェクトできない。
+
+**フォールバック:** v0.7 以前のグラフと非 git チェックアウトは `commit_stale: null` を返す；呼び出し元は既存の mtime ベースの `stale` フラグにフォールバック。既存ユーザーの動作変更なし。
+
+**参照 issue:** [#3170](https://github.com/open-gsd/gsd-core/issues/3170)
+
+---
+
+## v1.42.1 機能
+
+### 132. パッケージ正当性ゲート
+
+**目的:** 幻覚的、疑わしい、またはスロップスクワッティングのパッケージ名がシェルインストールコマンドに到達する前に停止します。
+
+**動作:**
+- フェーズリサーチは推奨パッケージの `## Package Legitimacy Audit` テーブルを書き込む。
+- 検索のみで確認されたパッケージは `[ASSUMED]` として扱われ、信頼されない。
+- `[SLOP]` パッケージは推奨から削除される。
+- `[ASSUMED]` または疑わしいパッケージを必要とするプランは人間の確認チェックポイントを追加する。
+- Executor のインストール失敗は、同様の名前のパッケージを自動的に試みる代わりに人間の確認のために停止する。
+
+**要件:**
+- REQ-PKG-GATE-01: リサーチはパッケージレジストリ、年齢、ダウンロード/ソースシグナル、スロップチェック verdict、および処分を記録しなければならない。
+- REQ-PKG-GATE-02: プランナーは実行前に未検証または疑わしいパッケージのインストールをゲートしなければならない。
+- REQ-PKG-GATE-03: Executor はパッケージマネージャーのインストール失敗後にパッケージ名を自動置換してはならない。
+
+**参照:** [v1.42.1 リリースノート](../RELEASE-v1.42.1.md)
+
+---
+
+### 133. スキルサーフェス予算
+
+**目的:** コンテキスト予算が重要な場合に、インストールされたスキルとエージェントのサーフェスエリアをユーザーが削減できるようにします。
+
+**インストールプロファイル:**
+| プロファイル | 目的 |
+|------------|------|
+| `core` | 最小限のメインループサーフェス |
+| `standard` | コアに加えて一般的なフェーズ管理コマンド |
+| `full` | 完全なサーフェス；デフォルト |
+
+**ランタイムコントロール:** `/gsd:surface` はプロファイル状態をリストし、再インストールなしにスキルクラスターを有効化、無効化、またはリセットします。
+
+**要件:**
+- REQ-SURFACE-01: インストーラーは `--profile=<name>` を解決し、アクティブなプロファイルを `.gsd-profile` に永続化しなければならない。
+- REQ-SURFACE-02: `--minimal` と `--core-only` は `--profile=core` のエイリアスとして残らなければならない。
+- REQ-SURFACE-03: ランタイムサーフェス状態はインストールプロファイルマーカーの外側に永続化されなければならない。
+
+**参照:** [ADR-0011](../adr/0011-skill-surface-budget-module.md)
+
+---
+
+### 134. インストーラーマイグレーション
+
+**目的:** インストールとアップデート中のランタイム設定クリーンアップを明示的で監査可能、かつロールバック対応にします。
+
+**機能:**
+- 初回ベースラインマイグレーションは管理されたファイルを記録する。
+- レガシーステールファイルのクリーンアップは削除または再書き込み前に所有権のエビデンスを使用する。
+- ユーザー所有のアーティファクトは保存される。
+- 曖昧な GSD らしいファイルはサイレントに上書きされる代わりに明確なレポートでブロックする。
+- マイグレーションプランはドライラン報告とロールバック保護をサポートする。
+
+**要件:**
+- REQ-INSTALL-MIGRATION-01: マイグレーション記録はメタデータ、インストールスコープ、所有権のエビデンスを含まなければならない。
+- REQ-INSTALL-MIGRATION-02: 所有権が曖昧な場合、破壊的なアクションはフェイルドクローズでなければならない。
+- REQ-INSTALL-MIGRATION-03: インストール失敗はロールバックデータが存在する場合、インストール前の状態を復元しなければならない。
+
+**参照:** [インストーラーマイグレーション](../installer-migrations.md)
+
+---
+
+### 135. カスタムシップ PR ボディセクション
+
+**コマンド:** `/gsd-ship`
+
+**設定キー:** `ship.pr_body_sections`
+
+**目的:** GSD ワークフローファイルを編集せずに、生成された PR ボディにプロジェクト固有の PRD スタイルセクションを追加します。
+
+**動作:** 設定されたセクションは必須の `Summary`、`Changes`、`Requirements Addressed`、`Verification`、および `Key Decisions` セクションの後に追加されます。アーティファクトの見出しからコピー、テンプレートをレンダリング、またはスタティックテキストにフォールバックできます。
+
+**要件:**
+- REQ-SHIP-SECTIONS-01: カスタムセクションは必須の PR セクションを置き換え、削除、または並べ替えてはならない。
+- REQ-SHIP-SECTIONS-02: 不明なテンプレートトークンは設定検証によって拒否されなければならない。
+- REQ-SHIP-SECTIONS-03: 無効化されたセクションは PR 出力に表示されることなく設定に残らなければならない。
+
+**参照:** [カスタム PR ボディセクション](../ship-pr-body-sections.md)
+
+---
+
+### 136. レビューデフォルトレビュアー
+
+**コマンド:** `/gsd-review`
+
+**設定キー:** `review.default_reviewers`
+
+**目的:** チームがフラグなしの `/gsd-review` 実行のデフォルトレビュアーサブセットを選択できるようにします。
+
+**優先順位:**
+```text
+明示的なレビュアーフラグ -> --all -> review.default_reviewers -> すべての検出されたレビュアー
+```
+
+**要件:**
+- REQ-REVIEW-DEFAULTS-01: `review.default_reviewers` が欠如している場合、以前のすべて検出動作を維持しなければならない。
+- REQ-REVIEW-DEFAULTS-02: 空の配列は拒否されなければならない；すべて検出動作を復元するにはキーを削除する。
+- REQ-REVIEW-DEFAULTS-03: 既知だが利用不可のレビュアーは実行をハードフェイルさせる代わりに診断とともにスキップされなければならない。
+
+**参照:** [設定リファレンス](../CONFIGURATION.md#reviewer-defaults-for-gsd-review)
+
+---
+
+### 137. ファロー構造レビュープリパス
+
+**コマンド:** `/gsd-code-review`
+
+**設定キー:** `code_quality.fallow.*`
+
+**目的:** エージェントレビューの前にオプションの構造分析パスを追加します。
+
+**動作:** 有効時、GSD は `fallow` バイナリを解決し、境界付き監査を実行し、`FALLOW.json` を書き込み、`REVIEW.md` に構造的な所見を埋め込みます。
+
+**要件:**
+- REQ-FALLOW-01: Fallow はオプトインであり、デフォルトで無効でなければならない。
+- REQ-FALLOW-02: 欠如または失敗した fallow 実行は明確な診断を生成しなければならない。
+- REQ-FALLOW-03: 埋め込み予算を超えた所見は、生の JSON アーティファクトを保存しながら警告とともにスキップされなければならない。
+
+**参照:** [設定リファレンス](../CONFIGURATION.md#code-quality-settings)
+
+---
+
+### 138. フェーズ終了時の人間検証モード
+
+**設定キー:** `workflow.human_verify_mode`
+
+**目的:** フライト中の人間チェックポイントの中断を減らしながら、人間の検証要件を保持します。
+
+**動作:** デフォルトの `"end-of-phase"` モードは人間チェックをフェーズレビューのための `<verify><human-check>` ブロックに埋め込みます。`"mid-flight"` はブロッキングの `checkpoint:human-verify` タスクを復元します。
+
+**要件:**
+- REQ-HUMAN-VERIFY-01: `checkpoint:decision` と `checkpoint:human-action` はモードに関わらずブロッキングのまま。
+- REQ-HUMAN-VERIFY-02: 人間が必要な検証はフェーズ終了時のレビューが解決するまで保留のまま。
+- REQ-HUMAN-VERIFY-03: キーのない設定は `"end-of-phase"` を使用しなければならない。
+
+**参照:** [チェックポイントリファレンス](../../get-shit-done/references/checkpoints.md)
+
+---
+
+### 139. クォータとレート制限の失敗分類
+
+**コマンド:** `/gsd-execute-phase`
+
+**目的:** プロバイダーのクォータとレート制限の失敗を、通常の executor の失敗ではなく待機して再開の条件として扱います。
+
+**動作:** エージェント出力は `429`、`rate limit`、`usage limit`、`RESOURCE_EXHAUSTED`、`usage_limit_reached` などのシグナルに対して分類されます。一致する失敗はリセット待ちの回復パスを提示します。
+
+**要件:**
+- REQ-QUOTA-01: クォータ失敗は即時再試行を主要な回復として提供してはならない。
+- REQ-QUOTA-02: 分類は Claude、Copilot、Codex、Gemini、および汎用プロバイダーセンチネルをカバーしなければならない。
+- REQ-QUOTA-03: 非クォータ失敗は通常の実行失敗パスを継続しなければならない。
+
+**参照:** [プロバイダーレート制限シグナル](../research/provider-rate-limit-signals.md)
+
+---
+
+### 140. ステータス行コンテキスト位置
+
+**設定キー:** `statusline.context_position`
+
+**目的:** 狭いターミナルでコンテキストメーターを見やすく保ちます。
+
+**オプション:**
+| 値 | 動作 |
+|----|------|
+| `"end"` | デフォルト；行末近くにコンテキストメーターをレンダリング |
+| `"front"` | モデル名の直後にコンテキストメーターをレンダリング |
+
+**要件:**
+- REQ-STATUSLINE-POS-01: 無効な値は設定検証によって拒否されなければならない。
+- REQ-STATUSLINE-POS-02: 設定が欠如している場合、既存の末尾位置レンダリングを維持しなければならない。
+
+**参照:** [設定リファレンス](../CONFIGURATION.md#statusline-settings)
+
+---
+
+### 141. マイルストーンタグ作成トグル
+
+**コマンド:** `/gsd-complete-milestone`
+
+**設定キー:** `git.create_tag`
+
+**目的:** 外部リリース自動化を持つプロジェクトがローカル git タグを作成せずにマイルストーンを完了できるようにします。
+
+**動作:** `git.create_tag: false` はマイルストーンタグ作成をスキップします。ワークフローは引き続きマイルストーンアーティファクトと状態を更新します。
+
+**要件:**
+- REQ-MILESTONE-TAG-01: 設定が欠如している場合、自動タグ作成を維持しなければならない。
+- REQ-MILESTONE-TAG-02: 既存のタグの衝突はタグを上書きする代わりに明確に失敗しなければならない。
+- REQ-MILESTONE-TAG-03: タグ作成の無効化はマイルストーンアーカイブをスキップしてはならない。
+
+**参照:** [設定リファレンス](../CONFIGURATION.md#git-branching)
+
+---
+
+### 142. 構造化 JSON エラーモード
+
+**CLI:** `gsd-tools --json-errors`
+
+**目的:** 自動化呼び出し元に安定した機械可読エラーエンベロープを提供します。
+
+**動作:** `--json-errors` 下で失敗するコマンドは、散文のみの stderr の代わりに、エラーの種類、メッセージ、コマンドコンテキスト、および終了マッピングを含む構造化された `ok: false` ペイロードを返します。
+
+**要件:**
+- REQ-JSON-ERRORS-01: 不明なコマンド、検証エラー、タイムアウト、ネイティブ失敗、フォールバック失敗、および内部エラーは正規エラーの種類にマッピングされなければならない。
+- REQ-JSON-ERRORS-02: CLI 終了コードマッピングは自動化呼び出し元に対して安定して維持されなければならない。
+- REQ-JSON-ERRORS-03: 人間可読出力は `--json-errors` が存在しない場合にデフォルトのまま。
+
+---
+
+## 関連
+
+- [コマンド](../COMMANDS.md)
+- [設定](../CONFIGURATION.md)
+- [ドキュメントインデックス](../README.md)
+
+**参照:** [JSON エラーモード](../json-errors.md)

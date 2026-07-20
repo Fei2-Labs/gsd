@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: File an issue on the active fork
-    url: https://github.com/GSD-redux/get-shit-done-redux/issues/new/choose
-    about: This repository is deprecated. Please file issues on the active fork.
-  - name: Why this repo is deprecated (notice)
-    url: https://github.com/gsd-build/get-shit-done#readme
-    about: "TÂCHES unreachable since 2026-04-01; $GSD token linked to rug-pull. See README banner."
+  - name: Discord Community
+    url: https://discord.gg/mYgfVNfA2r
+    about: Ask questions and get help from the community
+  - name: Discussions
+    url: https://github.com/Fei2-Labs/gsd/discussions
+    about: Share ideas or ask general questions

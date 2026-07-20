@@ -1,6 +1,6 @@
 # Git 规划提交
 
-通过 `gsd-sdk query commit` 提交规划工件，它会自动检查 `commit_docs` 配置和 gitignore 状态（与旧版 `gsd-tools.cjs commit` 行为相同）。
+通过 `gsd-tools.cjs query commit` 提交规划工件，它会自动检查 `commit_docs` 配置和 gitignore 状态（与旧版 `gsd-tools.cjs commit` 行为相同）。
 
 ## 通过 CLI 提交
 
@@ -9,7 +9,7 @@
 对 `.planning/` 文件始终使用此方式 —— 它会自动处理 `commit_docs` 与 gitignore 检查：
 
 ```bash
-gsd-sdk query commit "docs({scope}): {description}" --files .planning/STATE.md .planning/ROADMAP.md
+gsd-tools.cjs query commit "docs({scope}): {description}" --files .planning/STATE.md .planning/ROADMAP.md
 ```
 
 如果 `commit_docs` 为 `false` 或 `.planning/` 被 gitignore，CLI 会返回 `skipped`（带原因）。无需手动条件检查。
@@ -19,7 +19,7 @@ gsd-sdk query commit "docs({scope}): {description}" --files .planning/STATE.md .
 将 `.planning/` 文件变更合并到上次提交：
 
 ```bash
-gsd-sdk query commit "" --files .planning/codebase/*.md --amend
+gsd-tools.cjs query commit "" --files .planning/codebase/*.md --amend
 ```
 
 ## 提交消息模式

@@ -1,0 +1,88 @@
+{
+  "id": "kimi",
+  "role": "runtime",
+  "version": "1.7.0",
+  "title": "Kimi CLI",
+  "description": "Kimi CLI (Moonshot AI) — generic agents root at ~/.config/agents; skills + kimi-agents artifact layout; native config.toml [[hooks]] bus at ~/.kimi/config.toml; background dispatch; tier-2 support.",
+  "tier": "core",
+  "requires": [],
+  "engines": {
+    "gsd": ">=1.6.0"
+  },
+  "runtime": {
+    "configHome": {
+      "kind": "generic-agents-root",
+      "name": "agents",
+      "env": [
+        "KIMI_CONFIG_DIR"
+      ],
+      "probe": [
+        "~/.config/agents",
+        "~/.agents"
+      ],
+      "probeExists": "skills"
+    },
+    "localConfigDir": ".kimi-code",
+    "configFormat": "none",
+    "artifactLayout": {
+      "global": [
+        {
+          "kind": "skills",
+          "destSubpath": "skills",
+          "prefix": "gsd-",
+          "nesting": "flat",
+          "recursive": false,
+          "converter": "convertClaudeCommandToKimiSkill"
+        },
+        {
+          "kind": "kimi-agents",
+          "destSubpath": "agents",
+          "prefix": "gsd",
+          "nesting": "flat",
+          "recursive": false,
+          "converter": null
+        }
+      ],
+      "local": []
+    },
+    "commandStyle": "slash-hyphen",
+    "hooksSurface": "kimi-hooks-toml",
+    "hookEvents": "claude",
+    "sandboxTier": "none",
+    "supportTier": 2,
+    "installSurface": "profile-marker-only",
+    "writesSharedSettings": false,
+    "permissionWriter": null,
+    "extendedHookEvents": [
+      "SubagentStop",
+      "Stop",
+      "PreCompact",
+      "SubagentStart"
+    ],
+    "hostIntegration": {
+      "embeddingMode": "imperative",
+      "commandSurface": "slash-file",
+      "dispatch": {
+        "namedDispatch": true,
+        "nested": false,
+        "maxDepth": 1,
+        "background": true,
+        "subagentToolkit": "undocumented",
+        "backgroundDispatch": true
+      },
+      "modelMode": "passive",
+      "hookBus": "host",
+      "stateIO": "filesystem",
+      "transport": "mcp",
+      "runtime": "python"
+    },
+    "hostBehaviors": {
+      "reapplyCommand": "/skill:gsd-update --reapply",
+      "localInstallDeferred": true,
+      "verificationStyle": "kimi",
+      "agentManifestStyle": "kimi-nested",
+      "doneBannerStyle": "kimi-agent-file",
+      "skipSharedHooksInstall": true
+    }
+  }
+}

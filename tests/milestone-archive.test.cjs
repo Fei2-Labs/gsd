@@ -16,23 +16,15 @@ const { describe, test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('child_process');
 const { createTempProject, cleanup, runGsdTools, toPosixPath } = require('./helpers.cjs');
 
-const SDK_CLI = path.join(__dirname, '..', 'sdk', 'dist', 'cli.js');
-
 function runSdkQuery(args, cwd) {
+  const result = runGsdTools(args, cwd);
+  if (!result.success) return { success: false, error: result.error };
   try {
-    const result = execFileSync(process.execPath, [SDK_CLI, 'query', ...args], {
-      cwd,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return { success: true, data: JSON.parse(result.trim()) };
+    return { success: true, data: JSON.parse(result.output || '{}') };
   } catch (err) {
-    const stdout = err.stdout?.toString().trim() || '';
-    try { return { success: true, data: JSON.parse(stdout) }; } catch { /* not JSON */ }
-    return { success: false, error: (err.stderr?.toString().trim() || err.message) };
+    return { success: false, error: err.message };
   }
 }
 
@@ -89,7 +81,7 @@ describe('bug #2684: milestone.complete forwards version to phases.archive', () 
     assert.ok(fs.existsSync(path.join(tmpDir, '.planning', 'milestones', 'v1.0-phases')));
   });
 
-  test('phases.archive v1.0 (direct call) also works', () => {
+  test('phases.archive is no longer a direct public subcommand', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'ROADMAP.md'),
       `# Roadmap\n\n### Phase 1: Foundation\n**Goal:** Setup\n`,
@@ -97,8 +89,8 @@ describe('bug #2684: milestone.complete forwards version to phases.archive', () 
     fs.mkdirSync(path.join(tmpDir, '.planning', 'phases', '01-foundation'), { recursive: true });
 
     const result = runSdkQuery(['phases.archive', 'v1.0'], tmpDir);
-    assert.ok(result.success, `phases.archive failed: ${result.error}`);
-    assert.strictEqual(result.data.version, 'v1.0');
+    assert.equal(result.success, false, 'phases.archive should not be callable directly');
+    assert.match(result.error || '', /Unknown phases subcommand/i);
   });
 });
 
@@ -240,6 +232,7 @@ function setupMilestoneArchiveProject(tmpDir, options = {}) {
     roadmapPhases = ['64'],
   } = options;
 
+  // eslint-disable-next-line local/no-raw-rmsync-in-tests -- mid-fixture setup: removing subdirectory (not temp root teardown)
   fs.rmSync(path.join(tmpDir, '.planning', 'phases'), { recursive: true, force: true });
 
   const archiveDir = path.join(tmpDir, '.planning', 'milestones', `${milestone}-phases`);
@@ -305,6 +298,7 @@ describe('#3164 — validate consistency: milestone-archive layout', () => {
   });
 
   test('consistency scans only active milestone archive and still validates plans/frontmatter', () => {
+    // eslint-disable-next-line local/no-raw-rmsync-in-tests -- mid-test setup: removing subdirectory to establish milestone-archive layout
     fs.rmSync(path.join(tmpDir, '.planning', 'phases'), { recursive: true, force: true });
 
     const oldDir = path.join(tmpDir, '.planning', 'milestones', 'v1.6-phases', '64-legacy');
@@ -381,6 +375,7 @@ describe('#3164 — find-phase: milestone-archive layout', () => {
   });
 
   test('find-phase searches milestone archives in deterministic sorted order', () => {
+    // eslint-disable-next-line local/no-raw-rmsync-in-tests -- mid-test setup: removing phases subdirectory to establish milestone-archive layout
     fs.rmSync(path.join(tmpDir, '.planning', 'phases'), { recursive: true, force: true });
 
     const milestonesDir = path.join(tmpDir, '.planning', 'milestones');

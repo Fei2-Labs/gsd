@@ -1,7 +1,9 @@
 // allow-test-rule: docs-parity
-// Extracts CONFIG_DEFAULTS keys from core.cjs source to verify planning-config.md
+// allow-test-rule: source-text-is-the-product — settings-advanced.md prompt text is the deployed contract (#1216)
+// Extracts CONFIG_DEFAULTS keys from config-loader.cjs source to verify planning-config.md
 // stays in sync. The canonical list of defaults lives in source; there is no runtime
 // API to enumerate them. Source inspection is the only practical parity check here.
+// CONFIG_DEFAULTS was extracted from core.cjs into config-loader.cjs by ADR-857 phase 2e.
 
 /**
  * Verify planning-config.md documents all config fields from source code.
@@ -12,8 +14,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const REFERENCE_PATH = path.join(__dirname, '..', 'get-shit-done', 'references', 'planning-config.md');
-const CORE_PATH = path.join(__dirname, '..', 'get-shit-done', 'bin', 'lib', 'core.cjs');
+const REFERENCE_PATH = path.join(__dirname, '..', 'gsd-core', 'references', 'planning-config.md');
+const CORE_PATH = path.join(__dirname, '..', 'gsd-core', 'bin', 'lib', 'config-loader.cjs');
 
 describe('config-field-docs', () => {
   let content;
@@ -59,12 +61,12 @@ describe('config-field-docs', () => {
   });
 
   test('every CONFIG_DEFAULTS key appears in the doc', () => {
-    // Extract CONFIG_DEFAULTS keys from core.cjs source
+    // Extract CONFIG_DEFAULTS keys from config-loader.cjs source (moved from core.cjs by ADR-857 phase 2e)
     const coreSource = fs.readFileSync(CORE_PATH, 'utf-8');
     const defaultsMatch = coreSource.match(
-      /const CONFIG_DEFAULTS\s*=\s*\{([\s\S]*?)\n\};/
+      /const CONFIG_DEFAULTS\s*=\s*\{([\s\S]*?)\r?\n\};/
     );
-    assert.ok(defaultsMatch, 'Could not find CONFIG_DEFAULTS in core.cjs');
+    assert.ok(defaultsMatch, 'Could not find CONFIG_DEFAULTS in config-loader.cjs');
 
     const body = defaultsMatch[1];
     // Match property keys (word characters before the colon)
@@ -79,6 +81,7 @@ describe('config-field-docs', () => {
       verifier: 'workflow.verifier',
       nyquist_validation: 'workflow.nyquist_validation',
       ai_integration_phase: 'workflow.ai_integration_phase',
+      api_coverage_gate: 'workflow.api_coverage_gate',
       text_mode: 'workflow.text_mode',
       subagent_timeout: 'workflow.subagent_timeout',
       branching_strategy: 'git.branching_strategy',
@@ -207,4 +210,277 @@ describe('config-field-docs', () => {
       'planning-config.md must mention the plan_checker flat-key alias'
     );
   });
+
+  test('workflow.test_command is documented in planning-config.md (#1216)', () => {
+    assert.ok(
+      content.includes('`workflow.test_command`'),
+      'planning-config.md must document workflow.test_command'
+    );
+    // Must appear specifically in the Complete Field Reference section
+    const completeRefSection = content.slice(content.indexOf('## Complete Field Reference'));
+    assert.ok(
+      completeRefSection.includes('`workflow.test_command`'),
+      'planning-config.md Complete Field Reference must include workflow.test_command'
+    );
+  });
+
+  test('workflow.build_command is documented in planning-config.md (#1216)', () => {
+    assert.ok(
+      content.includes('`workflow.build_command`'),
+      'planning-config.md must document workflow.build_command'
+    );
+    // Must appear specifically in the Complete Field Reference section
+    const completeRefSection = content.slice(content.indexOf('## Complete Field Reference'));
+    assert.ok(
+      completeRefSection.includes('`workflow.build_command`'),
+      'planning-config.md Complete Field Reference must include workflow.build_command'
+    );
+  });
 });
+
+// ─── CONFIGURATION.md parity (#1216) ────────────────────────────────────────
+
+describe('CONFIGURATION.md parity (#1216)', () => {
+  const DOCS_CONFIG_PATH = path.join(__dirname, '..', 'docs', 'CONFIGURATION.md');
+  const SETTINGS_ADVANCED_PATH = path.join(
+    __dirname,
+    '..',
+    'gsd-core',
+    'workflows',
+    'settings-advanced.md',
+  );
+
+  let docsContent;
+  let settingsAdvancedContent;
+
+  before(() => {
+    docsContent = fs.readFileSync(DOCS_CONFIG_PATH, 'utf-8');
+    settingsAdvancedContent = fs.readFileSync(SETTINGS_ADVANCED_PATH, 'utf-8');
+  });
+
+  test('CONFIGURATION.md workflow.subagent_timeout describes milliseconds, not seconds (#1216)', () => {
+    assert.ok(
+      docsContent.includes('millisecond') || docsContent.includes('milliseconds'),
+      'CONFIGURATION.md workflow.subagent_timeout must use the word "millisecond(s)"'
+    );
+    assert.ok(
+      !docsContent.match(/\|\s*`workflow\.subagent_timeout`[^|]*\|\s*`?600`?\s*\|/),
+      'CONFIGURATION.md workflow.subagent_timeout must NOT have default 600 (that was the seconds default)'
+    );
+  });
+
+  test('CONFIGURATION.md workflow.subagent_timeout default is 300000 (#1216)', () => {
+    // Row-scoped: the actual table row for workflow.subagent_timeout must contain 300000
+    assert.ok(
+      /\|\s*`workflow\.subagent_timeout`\s*\|[^|]*\|\s*`?300000`?\s*\|/.test(docsContent),
+      'CONFIGURATION.md workflow.subagent_timeout table row must have default 300000'
+    );
+  });
+
+  test('settings-advanced.md subagent_timeout prompt says milliseconds, not seconds (#1216)', () => {
+    assert.ok(
+      settingsAdvancedContent.includes('millisecond') ||
+        settingsAdvancedContent.includes('milliseconds'),
+      'settings-advanced.md subagent_timeout prompt must use "millisecond(s)"'
+    );
+    assert.ok(
+      !settingsAdvancedContent.includes('Integer number of seconds'),
+      'settings-advanced.md must NOT say "Integer number of seconds" for subagent_timeout'
+    );
+  });
+
+  test('settings-advanced.md subagent_timeout prompt default is 300000 not 600 (#1216)', () => {
+    assert.ok(
+      !settingsAdvancedContent.match(/value or 600/),
+      'settings-advanced.md must NOT show 600 as the subagent_timeout default'
+    );
+    assert.ok(
+      settingsAdvancedContent.includes('300000'),
+      'settings-advanced.md must show 300000 as the subagent_timeout default'
+    );
+  });
+
+  test('settings-advanced.md parse-default list must NOT show subagent_timeout default 600 (#1216)', () => {
+    // Line 53 regression: the parse-default list item must use 300000, not 600
+    assert.ok(
+      !(/`workflow\.subagent_timeout`[^\r\n]*default:[^\n]*`?600`?/.test(settingsAdvancedContent)),
+      'settings-advanced.md must NOT list subagent_timeout default as 600 (stale seconds default)'
+    );
+  });
+
+  test('settings-advanced.md confirmation table must NOT label subagent_timeout as {seconds} (#1216)', () => {
+    // Line 754 regression: the confirmation table row must say {milliseconds}, not {seconds}
+    assert.ok(
+      !(/workflow\.subagent_timeout\s*\|\s*\{seconds\}/.test(settingsAdvancedContent)),
+      'settings-advanced.md confirmation table must NOT label subagent_timeout as {seconds}'
+    );
+  });
+
+  test('settings-advanced.md bash example must NOT use subagent_timeout 900 (#1216)', () => {
+    // Line 501 regression: the bash example must not show the stale 900 value
+    assert.ok(
+      !(/subagent_timeout 900\b/.test(settingsAdvancedContent)),
+      'settings-advanced.md bash example must NOT set subagent_timeout to 900 (stale seconds value)'
+    );
+  });
+
+  test('CONFIGURATION.md review.models rows do not show shell command examples (#1216)', () => {
+    // The Integration Settings section (around line 195-202) used to have
+    // shell-command examples like "codex exec --model gpt-5". After the fix
+    // those rows must describe model ids, not full commands.
+    assert.ok(
+      !docsContent.includes('"codex exec --model'),
+      'CONFIGURATION.md must NOT contain "codex exec --model" shell command example'
+    );
+    assert.ok(
+      !docsContent.includes('"opencode run --model'),
+      'CONFIGURATION.md must NOT contain "opencode run --model" shell command example'
+    );
+    assert.ok(
+      !docsContent.includes('"gemini -m gemini'),
+      'CONFIGURATION.md must NOT contain "gemini -m gemini..." shell command example'
+    );
+  });
+
+  test('workflow.test_command is documented in CONFIGURATION.md (#1216)', () => {
+    assert.ok(
+      docsContent.includes('`workflow.test_command`'),
+      'CONFIGURATION.md must document workflow.test_command'
+    );
+  });
+
+  test('workflow.build_command is documented in CONFIGURATION.md (#1216)', () => {
+    assert.ok(
+      docsContent.includes('`workflow.build_command`'),
+      'CONFIGURATION.md must document workflow.build_command'
+    );
+  });
+});
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Folded from tests/enh-1494-workflow-config-key-docs.test.cjs — consolidation epic #1969 (B3 #1972)
+// ────────────────────────────────────────────────────────────────────────
+{
+  const { describe: __foldDescribe } = require('node:test');
+  __foldDescribe("folded:enh-1494-workflow-config-key-docs (consolidation epic #1969 B3 #1972)", () => {
+'use strict';
+
+/**
+ * Parity assertions for #1494: workflow config keys that are consumed by
+ * planning-pipeline code must be (a) accepted by VALID_CONFIG_KEYS and
+ * (b) documented in references/planning-config.md.
+ *
+ * Per DEFECT.GENERATIVE-FIX: a shared constant / key-list that spans two
+ * surfaces requires a parity assertion that fails when the surfaces diverge.
+ */
+
+const { describe, test, before, afterEach } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+
+const { createTempProject, cleanup, runGsdTools } = require('./helpers.cjs');
+
+const CONFIG_SCHEMA_PATH = path.join(__dirname, '..', 'gsd-core', 'bin', 'lib', 'config-schema.cjs');
+const PLANNING_CONFIG_PATH = path.join(__dirname, '..', 'gsd-core', 'references', 'planning-config.md');
+
+describe('VALID_CONFIG_KEYS parity — #1494 orphan-undocumented keys', () => {
+  const { VALID_CONFIG_KEYS } = require(CONFIG_SCHEMA_PATH);
+
+  test('workflow.mvp_mode is in VALID_CONFIG_KEYS', () => {
+    assert.ok(
+      VALID_CONFIG_KEYS.has('workflow.mvp_mode'),
+      'workflow.mvp_mode is read by config-loader.cts and plan-phase.md but was missing from VALID_CONFIG_KEYS (#1494)'
+    );
+  });
+
+  test('workflow.code_review_command is in VALID_CONFIG_KEYS', () => {
+    assert.ok(
+      VALID_CONFIG_KEYS.has('workflow.code_review_command'),
+      'workflow.code_review_command must be in VALID_CONFIG_KEYS'
+    );
+  });
+
+  test('workflow.plan_chunked is in VALID_CONFIG_KEYS', () => {
+    assert.ok(
+      VALID_CONFIG_KEYS.has('workflow.plan_chunked'),
+      'workflow.plan_chunked must be in VALID_CONFIG_KEYS'
+    );
+  });
+
+  test('workflow.test_command is in VALID_CONFIG_KEYS', () => {
+    assert.ok(
+      VALID_CONFIG_KEYS.has('workflow.test_command'),
+      'workflow.test_command must be in VALID_CONFIG_KEYS'
+    );
+  });
+
+  test('workflow.build_command is in VALID_CONFIG_KEYS', () => {
+    assert.ok(
+      VALID_CONFIG_KEYS.has('workflow.build_command'),
+      'workflow.build_command must be in VALID_CONFIG_KEYS'
+    );
+  });
+});
+
+describe('config-set accepts workflow.mvp_mode (#1494)', () => {
+  let tmpDir;
+  afterEach(() => { if (tmpDir) cleanup(tmpDir); });
+
+  test('config-set workflow.mvp_mode true succeeds and stores the value', () => {
+    tmpDir = createTempProject();
+    const result = runGsdTools(['config-set', 'workflow.mvp_mode', 'true'], tmpDir);
+    assert.ok(
+      result.success,
+      `config-set workflow.mvp_mode must succeed; got:\nstdout: ${result.output}\nstderr: ${result.error}`
+    );
+    const parsed = JSON.parse(result.output);
+    assert.strictEqual(parsed.updated, true, 'response must have updated:true');
+    assert.strictEqual(parsed.key, 'workflow.mvp_mode', 'response must echo the key');
+  });
+
+  test('config-set workflow.mvp_mode false succeeds', () => {
+    tmpDir = createTempProject();
+    const result = runGsdTools(['config-set', 'workflow.mvp_mode', 'false'], tmpDir);
+    assert.ok(
+      result.success,
+      `config-set workflow.mvp_mode false must succeed; got:\nstdout: ${result.output}\nstderr: ${result.error}`
+    );
+    const parsed = JSON.parse(result.output);
+    assert.strictEqual(parsed.updated, true);
+  });
+});
+
+// allow-test-rule: source-text-is-the-product — planning-config.md is the deployed reference contract (#1494)
+describe('planning-config.md documents #1494 keys', () => {
+  let content;
+  before(() => { content = fs.readFileSync(PLANNING_CONFIG_PATH, 'utf-8'); });
+
+  const KEYS = [
+    'workflow.mvp_mode',
+    'workflow.code_review_command',
+    'workflow.plan_chunked',
+    'workflow.test_command',
+    'workflow.build_command',
+  ];
+
+  for (const key of KEYS) {
+    test(`planning-config.md documents \`${key}\``, () => {
+      assert.ok(
+        content.includes(`\`${key}\``),
+        `planning-config.md must document \`${key}\` (#1494)`
+      );
+    });
+
+    test(`\`${key}\` appears in the Complete Field Reference section`, () => {
+      const refSection = content.slice(content.indexOf('## Complete Field Reference'));
+      assert.ok(
+        refSection.includes(`\`${key}\``),
+        `planning-config.md Complete Field Reference must include \`${key}\` (#1494)`
+      );
+    });
+  }
+});
+  });
+}

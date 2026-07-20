@@ -1,7 +1,7 @@
 ---
 name: gsd:review
 description: Request cross-AI peer review of phase plans from external AI CLIs
-argument-hint: "--phase N [--gemini] [--claude] [--codex] [--opencode] [--qwen] [--cursor] [--all]"
+argument-hint: "--phase N [--gemini] [--claude] [--codex] [--opencode] [--qwen] [--cursor] [--agy] [--all]"
 allowed-tools:
   - Read
   - Write
@@ -20,7 +20,7 @@ planning via /gsd:plan-phase --reviews.
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/review.md
+@~/.claude/gsd-core/workflows/review.md
 </execution_context>
 
 <context>
@@ -33,7 +33,14 @@ Phase number: extracted from $ARGUMENTS (required)
 - `--opencode` — Include OpenCode review (uses model from user's OpenCode config)
 - `--qwen` — Include Qwen Code review (Alibaba Qwen models)
 - `--cursor` — Include Cursor agent review
+- `--agy` / `--antigravity` — Include Antigravity CLI review
 - `--all` — Include all available CLIs
+
+**No flags** — if `review.default_reviewers` is set, review with only those configured
+reviewers that are detected; otherwise review with all available CLIs. Configured
+`review.reviewer_instances` names may appear in `review.default_reviewers`; each runs as an
+independent reviewer identity backed by its configured adapter+model (see
+`docs/CONFIGURATION.md`). Instance names are not valid as flags.
 </context>
 
 <process>

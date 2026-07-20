@@ -3,7 +3,7 @@
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { estimateTokens, applyBudget } = require('../get-shit-done/bin/lib/prompt-budget.cjs');
+const { estimateTokens, applyBudget } = require('../gsd-core/bin/lib/prompt-budget.cjs');
 
 describe('prompt-budget', () => {
   // ── Cycle 1: estimator basics ──────────────────────────────────────────────
@@ -84,7 +84,7 @@ describe('prompt-budget', () => {
       requirements: null,
     };
 
-    const { prompt, metadata } = applyBudget({ sections, budget: 200 });
+    const { metadata } = applyBudget({ sections, budget: 200 });
 
     // context drops first per spec (priority 6), research second (priority 7)
     assert.deepEqual(metadata.omitted, ['context', 'research']);
@@ -183,7 +183,7 @@ describe('prompt-budget', () => {
       requirements: bigContent,
     };
 
-    const { prompt, metadata } = applyBudget({ sections, budget: 200 });
+    const { metadata } = applyBudget({ sections, budget: 200 });
 
     assert.deepEqual(metadata.omitted, ['context', 'research', 'requirements']);
     assert.equal(metadata.noteInjected, true);
@@ -237,7 +237,7 @@ describe('prompt-budget', () => {
       requirements: null,
     };
 
-    const { prompt, metadata } = applyBudget({ sections, budget: 145 });
+    const { metadata } = applyBudget({ sections, budget: 145 });
 
     // Research must be dropped (it caused the pressure)
     assert.ok(metadata.omitted.includes('research'), 'research must be omitted');

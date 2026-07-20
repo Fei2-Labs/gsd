@@ -3,24 +3,53 @@ name: Security Scan
 on:
   pull_request:
     branches:
+      - next
       - main
       - 'release/**'
       - 'hotfix/**'
+    paths:
+      - 'gsd-core/**'
+      - 'agents/**'
+      - 'commands/**'
+      - 'hooks/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/security-scan.yml'
+      - '.secretscanignore'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   security:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 30m (was 10m): the base64 scan is O(changed-files); a very large diff
+    # (e.g. the #604 repo-wide rename, ~800 changed files) can exceed 10m. The
+    # scan itself is unchanged; this only raises the ceiling for big diffs.
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dependency integrity gate
+        run: node scripts/check-npm-integrity.cjs
 
       - name: Prompt injection scan
         env:
@@ -42,6 +71,11 @@ jobs:
         run: |
           chmod +x scripts/secret-scan.sh
           scripts/secret-scan.sh --diff "origin/$BASE_REF"
+
+      - name: Secret scan exclusion lint
+        run: |
+          chmod +x scripts/secret-scan-lint.sh
+          scripts/secret-scan-lint.sh --file .secretscanignore
 
       - name: Planning directory check
         env:

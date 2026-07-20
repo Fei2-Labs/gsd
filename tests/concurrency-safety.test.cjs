@@ -20,29 +20,16 @@ const { test, describe, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-const { execSync, exec } = require('child_process');
-const { promisify } = require('util');
-const { performance } = require('perf_hooks');
-const { runGsdTools, createTempProject, cleanup, TOOLS_PATH } = require('./helpers.cjs');
+const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
 
-const { normalizeContent } = require('../get-shit-done/bin/lib/shell-command-projection.cjs');
+const { normalizeContent } = require('../gsd-core/bin/lib/shell-command-projection.cjs');
 // normalizeMd was removed from core.cjs (Phase 4 — issue #3468); the same algorithm now
 // lives in the shell-command-projection seam. Wrap normalizeContent so existing
 // behavioral / snapshot / perf assertions stay point-of-truth.
 const normalizeMd = (input) => normalizeContent('test.md', input).content;
 
-const execAsync = promisify(exec);
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function writeMinimalRoadmap(tmpDir, phases = ['1']) {
-  const lines = phases.map(n => `### Phase ${n}: Phase ${n} Description`).join('\n');
-  fs.writeFileSync(
-    path.join(tmpDir, '.planning', 'ROADMAP.md'),
-    `# Roadmap\n\n${lines}\n`
-  );
-}
 
 function writeMinimalStateMd(tmpDir, content) {
   const defaultContent = content || `# Session State\n\n## Current Position\n\nPhase: 1\n`;
@@ -52,22 +39,6 @@ function writeMinimalStateMd(tmpDir, content) {
   );
 }
 
-function writeMinimalProjectMd(tmpDir) {
-  const sections = ['## What This Is', '## Core Value', '## Requirements'];
-  const content = sections.map(s => `${s}\n\nContent here.\n`).join('\n');
-  fs.writeFileSync(
-    path.join(tmpDir, '.planning', 'PROJECT.md'),
-    `# Project\n\n${content}`
-  );
-}
-
-function writeValidConfigJson(tmpDir, overrides = {}) {
-  const base = { model_profile: 'balanced', commit_docs: true };
-  fs.writeFileSync(
-    path.join(tmpDir, '.planning', 'config.json'),
-    JSON.stringify({ ...base, ...overrides }, null, 2)
-  );
-}
 
 /**
  * Generate a 50-phase project structure for stress testing.
@@ -155,6 +126,10 @@ describe('planning lock integration', () => {
     fs.mkdirSync(p1, { recursive: true });
     fs.writeFileSync(path.join(p1, '01-01-PLAN.md'), '# Plan');
     fs.writeFileSync(path.join(p1, '01-01-SUMMARY.md'), '# Summary');
+    fs.writeFileSync(
+      path.join(p1, '01-VERIFICATION.md'),
+      '---\nstatus: passed\nscore: "1/1"\n---\n# Verification\nPassed.\n',
+    );
     fs.mkdirSync(path.join(tmpDir, '.planning', 'phases', '02-api'), { recursive: true });
 
     const result = runGsdTools('phase complete 1', tmpDir);
@@ -333,79 +308,15 @@ describe('multi-process concurrent write tests', () => {
     cleanup(tmpDir);
   });
 
-  test('two concurrent state patches to DIFFERENT fields both persist', async () => {
-    fs.writeFileSync(
-      path.join(tmpDir, '.planning', 'STATE.md'),
-      [
-        '# Project State',
-        '',
-        '**Current Phase:** 01',
-        '**Status:** In progress',
-        '**Current Plan:** 01-01',
-        '**Last Activity:** 2025-01-01',
-        '**Last Activity Description:** Working',
-        '',
-      ].join('\n')
-    );
+  // 'two concurrent state patches to DIFFERENT fields both persist' deleted per #453 (clock-seam):
+  // plain Promise.all without a barrier is non-deterministic — the weakened OR assertion
+  // (aOk || bOk) and the vacuous assert.ok(true, ...) make the test pass even when one write
+  // is lost. Deterministic barrier-based coverage lives in locking-bugs-1909-1916-1925-1927:
+  //   'state update: both concurrent updates to different fields survive'.
 
-    const toolsPath = TOOLS_PATH;
-    const nodeBin = process.execPath;
-    const cmdA = `"${nodeBin}" "${toolsPath}" state patch --Status Complete --cwd "${tmpDir}"`;
-    const cmdB = `"${nodeBin}" "${toolsPath}" state patch --"Current Plan" 01-02 --cwd "${tmpDir}"`;
-
-    const [resultA, resultB] = await Promise.all([
-      execAsync(cmdA, { encoding: 'utf-8' }).catch(e => e),
-      execAsync(cmdB, { encoding: 'utf-8' }).catch(e => e),
-    ]);
-
-    const aOk = !(resultA instanceof Error);
-    const bOk = !(resultB instanceof Error);
-    assert.ok(aOk || bOk, 'At least one concurrent patch should succeed');
-
-    const content = fs.readFileSync(path.join(tmpDir, '.planning', 'STATE.md'), 'utf-8');
-
-    assert.ok(
-      content.includes('Complete') || content.includes('01-02'),
-      `At least one concurrent patch should persist in STATE.md. Content:\n${content}`
-    );
-
-    if (content.includes('Complete') && content.includes('01-02')) {
-      assert.ok(true, 'Both concurrent patches persisted (lock serialization)');
-    }
-
-    assert.ok(content.includes('**Current Phase:** 01'), 'Untouched field Current Phase should survive');
-    assert.ok(content.includes('2025-01-01'), 'Untouched field Last Activity should survive');
-  });
-
-  test('lock file does not persist after concurrent operations', async () => {
-    fs.writeFileSync(
-      path.join(tmpDir, '.planning', 'STATE.md'),
-      [
-        '# Project State',
-        '',
-        '**Current Phase:** 01',
-        '**Status:** Planning',
-        '**Current Plan:** 01-01',
-        '',
-      ].join('\n')
-    );
-
-    const toolsPath = TOOLS_PATH;
-    const nodeBin = process.execPath;
-    const cmdA = `"${nodeBin}" "${toolsPath}" state patch --Status Complete --cwd "${tmpDir}"`;
-    const cmdB = `"${nodeBin}" "${toolsPath}" state patch --"Current Plan" 01-02 --cwd "${tmpDir}"`;
-
-    await Promise.all([
-      execAsync(cmdA, { encoding: 'utf-8' }).catch(() => {}),
-      execAsync(cmdB, { encoding: 'utf-8' }).catch(() => {}),
-    ]);
-
-    const lockPath = path.join(tmpDir, '.planning', 'STATE.md.lock');
-    assert.ok(
-      !fs.existsSync(lockPath),
-      'STATE.md.lock should not persist after concurrent operations complete'
-    );
-  });
+  // 'lock file does not persist after concurrent operations' deleted per #453 (clock-seam):
+  // plain Promise.all without a barrier; lock-cleanup coverage is in clock-seam.test.cjs
+  //   describe('exit cleanup: STATE.md.lock removed on process exit').
 
   test('three rapid sequential patches all persist', () => {
     fs.writeFileSync(
@@ -513,80 +424,10 @@ describe('normalizeMd behavioral equivalence', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. normalizeMd performance benchmark
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('normalizeMd performance benchmark', () => {
-  test('processes a 100-line markdown file in under 50ms', () => {
-    const lines = [];
-    for (let i = 0; i < 100; i++) {
-      if (i % 20 === 0) {
-        lines.push(`## Section ${i / 20 + 1}`);
-      } else if (i % 30 === 0) {
-        lines.push('```js');
-        lines.push(`const x${i} = ${i};`);
-        lines.push('```');
-      } else if (i % 5 === 0) {
-        lines.push(`- List item ${i}`);
-      } else {
-        lines.push(`Paragraph text line ${i} with some content to process.`);
-      }
-    }
-    const input = lines.join('\n') + '\n';
-
-    const start = performance.now();
-    const result = normalizeMd(input);
-    const elapsed = performance.now() - start;
-
-    assert.ok(typeof result === 'string', 'should return a string');
-    assert.ok(result.length > 0, 'result should not be empty');
-    assert.ok(result.endsWith('\n'), 'result should end with newline');
-    assert.ok(elapsed < 50, `100-line file should process in under 50ms, took ${elapsed.toFixed(2)}ms`);
-  });
-
-  test('processes a 1000-line markdown file with 20 code blocks in under 200ms', () => {
-    const lines = [];
-    let codeBlockCount = 0;
-    for (let i = 0; i < 1000; i++) {
-      if (i % 50 === 0 && codeBlockCount < 20) {
-        lines.push(`## Section ${codeBlockCount + 1}`);
-        lines.push('');
-        lines.push('Some introductory text for this section.');
-        lines.push('');
-        lines.push('```python');
-        for (let j = 0; j < 5; j++) {
-          lines.push(`    result_${codeBlockCount}_${j} = compute(${j})`);
-        }
-        lines.push('```');
-        lines.push('');
-        lines.push('Explanation of the code above.');
-        codeBlockCount++;
-      } else if (i % 10 === 0) {
-        lines.push(`### Subsection at line ${i}`);
-      } else if (i % 7 === 0) {
-        lines.push(`- Item ${i}: description of this list item`);
-      } else if (i % 13 === 0) {
-        lines.push(`1. Ordered item ${i}`);
-      } else {
-        lines.push(`Line ${i}: Regular paragraph content with various markdown elements.`);
-      }
-    }
-    const input = lines.join('\n') + '\n';
-
-    normalizeMd(input); // warm up JIT
-
-    const start = performance.now();
-    const result = normalizeMd(input);
-    const elapsed = performance.now() - start;
-
-    assert.ok(typeof result === 'string', 'should return a string');
-    assert.ok(result.length > 0, 'result should not be empty');
-    assert.ok(result.endsWith('\n'), 'result should end with newline');
-    assert.ok(!result.includes('\n\n\n'), 'should not have 3+ consecutive blank lines');
-    assert.ok(elapsed < 200, `1000-line file with 20 code blocks should process in under 200ms, took ${elapsed.toFixed(2)}ms`);
-  });
-});
+// normalizeMd performance benchmark tests deleted per #453 (clock-seam):
+// wall-clock assertions (elapsed < 50ms, elapsed < 200ms) are inherently
+// flaky on loaded CI runners. Correctness is covered by the snapshot tests
+// in describe('normalizeMd snapshot tests') below.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 6. normalizeMd snapshot tests
@@ -785,23 +626,11 @@ describe('stress tests with 50+ phases', () => {
     cleanup(tmpDir);
   });
 
-  test('roadmap analyze on 50-phase ROADMAP completes in under 2000ms', () => {
-    create50PhaseProject(tmpDir, 25);
+  // roadmap analyze on 50-phase ROADMAP: behavioral test without timing gate.
+  // The elapsed < N wall-clock gate was a persistent flake source (#7, #453).
+  // Equivalent behavioral coverage (50 phases, 25 complete) lives in
+  // tests/clock-seam.test.cjs describe('roadmap analyze behavioral correctness').
 
-    const start = performance.now();
-    const result = runGsdTools('roadmap analyze', tmpDir);
-    const elapsed = performance.now() - start;
-
-    assert.ok(result.success, `roadmap analyze should succeed: ${result.error}`);
-    assert.ok(elapsed < 2000, `Should complete in under 2000ms, took ${elapsed.toFixed(0)}ms`);
-
-    const output = JSON.parse(result.output);
-    assert.ok(Array.isArray(output.phases), 'Output should contain a phases array');
-    assert.strictEqual(output.phases.length, 50, `Should have 50 phases, got ${output.phases.length}`);
-
-    const completedPhases = output.phases.filter(p => p.disk_status === 'complete');
-    assert.strictEqual(completedPhases.length, 25, `Should have 25 complete phases, got ${completedPhases.length}`);
-  });
 
   test('phase complete on phase 26 of 50-phase project works correctly', () => {
     create50PhaseProject(tmpDir, 25);
@@ -811,6 +640,10 @@ describe('stress tests with 50+ phases', () => {
     fs.writeFileSync(
       path.join(phase26Dir, '26-01-SUMMARY.md'),
       '# Phase 26 Plan 1 Summary\n\nFeature 26 completed.\n'
+    );
+    fs.writeFileSync(
+      path.join(phase26Dir, '26-VERIFICATION.md'),
+      '---\nstatus: passed\nscore: "1/1"\n---\n# Verification\nPassed.\n',
     );
 
     const result = runGsdTools('phase complete 26', tmpDir);

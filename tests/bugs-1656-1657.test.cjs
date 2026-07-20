@@ -47,18 +47,12 @@ describe('#1656: community .sh hooks must be present in hooks/dist', () => {
   });
 });
 
-// ─── #1657 ───────────────────────────────────────────────────────────────────
+// ─── #1657 / #191 follow-up ──────────────────────────────────────────────────
 //
-// Historical context: #1657 originally guarded against a broken `promptSdk()`
-// flow that shipped when `@gsd-build/sdk` did not yet exist on npm. The
-// package was published at v0.1.0 and is now a hard runtime requirement for
-// every /gsd-* command (they all shell out to `gsd-sdk query …`).
-//
-// #2385 restored the `--sdk` flag and made SDK install the default path in
-// bin/install.js. These guards are inverted: we now assert that SDK install
-// IS wired up, and that the old broken `promptSdk()` prompt is still gone.
+// The retired SDK package seam means installer/package metadata must no longer
+// expose sdk-specific flags or publish sdk/* artifacts.
 
-describe('#1657 / #2385: SDK install must be wired into installer source', () => {
+describe('#1657 / #191: installer/package metadata retires sdk seam', () => {
   let src;
   test('install.js does not contain the legacy promptSdk() prompt (#1657)', () => {
     src = fs.readFileSync(INSTALL_SRC, 'utf-8');
@@ -68,54 +62,48 @@ describe('#1657 / #2385: SDK install must be wired into installer source', () =>
     );
   });
 
-  test('install.js wires up --sdk / --no-sdk flag handling (#2385)', () => {
+  test('install.js does not parse --sdk / --no-sdk flags (#191)', () => {
     src = src || fs.readFileSync(INSTALL_SRC, 'utf-8');
     assert.ok(
-      src.includes("args.includes('--sdk')"),
-      '--sdk flag must be parsed so users can force SDK (re)install'
+      !src.includes("args.includes('--sdk')"),
+      '--sdk flag must not be parsed after sdk package retirement'
     );
     assert.ok(
-      src.includes("args.includes('--no-sdk')"),
-      '--no-sdk flag must be parsed so users can opt out of SDK install'
+      !src.includes("args.includes('--no-sdk')"),
+      '--no-sdk flag must not be parsed after sdk package retirement'
     );
   });
 
-  test('install.js verifies prebuilt sdk/dist/cli.js instead of building from source (#2441)', () => {
+  test('install.js does not invoke installSdkIfNeeded during install (#191)', () => {
     src = src || fs.readFileSync(INSTALL_SRC, 'utf-8');
-    // As of fix/2441-sdk-decouple, the installer no longer runs `npm run build`
-    // or `npm install -g .` from sdk/. Instead it verifies sdk/dist/cli.js exists
-    // (shipped prebuilt in the tarball) and optionally chmods it.
     assert.ok(
-      src.includes('sdk/dist/cli.js') || src.includes("'dist', 'cli.js'"),
-      'installer must reference sdk/dist/cli.js to verify the prebuilt dist (#2441)'
-    );
-    // Confirm the old build-from-source pattern is gone.
-    const hasBuildFromSource =
-      src.includes("['run', 'build']") &&
-      src.includes("cwd: sdkDir");
-    assert.ok(
-      !hasBuildFromSource,
-      'installer must NOT run `npm run build` from sdk/ at install time (#2441)'
-    );
-    const hasGlobalInstall =
-      (src.includes("['install', '-g', '.']") || src.includes("'npm install -g .'")) &&
-      src.includes("cwd: sdkDir");
-    assert.ok(
-      !hasGlobalInstall,
-      'installer must NOT run `npm install -g .` from sdk/ (#2441)'
+      !src.includes('installSdkIfNeeded({'),
+      'installer must not invoke installSdkIfNeeded during runtime install flow'
     );
   });
 
-  test('package.json ships sdk dist and source in published tarball (#2441)', () => {
+  test('package.json does not publish sdk/* artifacts (#191)', () => {
     const rootPkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
     const files = rootPkg.files || [];
     assert.ok(
-      files.some((f) => f === 'sdk/src' || f.startsWith('sdk/src')),
-      'root package.json `files` must include sdk/src'
+      files.every((f) => !String(f).startsWith('sdk')),
+      'root package.json files must not include sdk paths'
     );
-    assert.ok(
-      files.some((f) => f === 'sdk/dist' || f.startsWith('sdk/dist')),
-      'root package.json `files` must include sdk/dist so the prebuilt CLI ships in the tarball (#2441)'
-    );
+  });
+
+  test('root tsconfig project references resolve to existing paths (#191)', () => {
+    const tsconfigPath = path.join(__dirname, '..', 'tsconfig.json');
+    if (!fs.existsSync(tsconfigPath)) return;
+
+    const tsconfig = JSON.parse(fs.readFileSync(tsconfigPath, 'utf-8'));
+    const references = tsconfig.references || [];
+    for (const ref of references) {
+      const refPath = String(ref.path || '');
+      assert.notEqual(refPath, 'sdk', 'root tsconfig must not reference retired sdk project');
+      assert.ok(
+        fs.existsSync(path.join(__dirname, '..', refPath)),
+        `root tsconfig reference must exist: ${refPath}`
+      );
+    }
   });
 });

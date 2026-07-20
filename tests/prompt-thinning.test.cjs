@@ -1,9 +1,9 @@
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 'use strict';
 
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
 
 /**
  * Prompt Thinning Tests (#1978)
@@ -18,11 +18,11 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const EXECUTE_PHASE = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'execute-phase.md');
+const EXECUTE_PHASE = path.join(__dirname, '..', 'gsd-core', 'workflows', 'execute-phase.md');
 const EXECUTOR_AGENT = path.join(__dirname, '..', 'agents', 'gsd-executor.md');
 const PLANNER_AGENT = path.join(__dirname, '..', 'agents', 'gsd-planner.md');
-const EXECUTOR_EXAMPLES_REF = path.join(__dirname, '..', 'get-shit-done', 'references', 'executor-examples.md');
-const PLANNER_ANTIPATTERNS_REF = path.join(__dirname, '..', 'get-shit-done', 'references', 'planner-antipatterns.md');
+const EXECUTOR_EXAMPLES_REF = path.join(__dirname, '..', 'gsd-core', 'references', 'executor-examples.md');
+const PLANNER_ANTIPATTERNS_REF = path.join(__dirname, '..', 'gsd-core', 'references', 'planner-antipatterns.md');
 
 describe('prompt thinning — sub-200K context window support (#1978)', () => {
 
@@ -76,7 +76,7 @@ describe('prompt thinning — sub-200K context window support (#1978)', () => {
     test('file exists', () => {
       assert.ok(
         fs.existsSync(EXECUTOR_EXAMPLES_REF),
-        'get-shit-done/references/executor-examples.md must exist'
+        'gsd-core/references/executor-examples.md must exist'
       );
     });
 
@@ -109,7 +109,7 @@ describe('prompt thinning — sub-200K context window support (#1978)', () => {
     test('file exists', () => {
       assert.ok(
         fs.existsSync(PLANNER_ANTIPATTERNS_REF),
-        'get-shit-done/references/planner-antipatterns.md must exist'
+        'gsd-core/references/planner-antipatterns.md must exist'
       );
     });
 

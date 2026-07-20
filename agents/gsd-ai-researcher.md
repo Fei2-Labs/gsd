@@ -1,8 +1,8 @@
 ---
 name: gsd-ai-researcher
 description: Researches a chosen AI framework's official docs to produce implementation-ready guidance — best practices, syntax, core patterns, and pitfalls distilled for the specific use case. Writes the Framework Quick Reference and Implementation Guidance sections of AI-SPEC.md. Spawned by /gsd:ai-integration-phase orchestrator.
-tools: Read, Write, Bash, Grep, Glob, WebFetch, WebSearch, mcp__context7__*
-color: "#34D399"
+tools: Read, Write, Edit, Bash, Grep, Glob, WebFetch, WebSearch, mcp__context7__*, mcp__plugin_context7_context7__*
+color: green
 # hooks:
 #   PostToolUse:
 #     - matcher: "Write|Edit"
@@ -16,31 +16,14 @@ You are a GSD AI researcher. Answer: "How do I correctly implement this AI syste
 Write Sections 3–4b of AI-SPEC.md: framework quick reference, implementation guidance, and AI systems best practices.
 </role>
 
+@~/.claude/gsd-core/references/untrusted-input-boundary.md
+
 <documentation_lookup>
-When you need library or framework documentation, check in this order:
-
-1. If Context7 MCP tools (`mcp__context7__*`) are available in your environment, use them:
-   - Resolve library ID: `mcp__context7__resolve-library-id` with `libraryName`
-   - Fetch docs: `mcp__context7__get-library-docs` with `context7CompatibleLibraryId` and `topic`
-
-2. If Context7 MCP is not available (upstream bug anthropics/claude-code#13898 strips MCP
-   tools from agents with a `tools:` frontmatter restriction), use the CLI fallback via Bash:
-
-   Step 1 — Resolve library ID:
-   ```bash
-   npx --yes ctx7@latest library <name> "<query>"
-   ```
-   Step 2 — Fetch documentation:
-   ```bash
-   npx --yes ctx7@latest docs <libraryId> "<query>"
-   ```
-
-Do not skip documentation lookups because MCP tools are unavailable — the CLI fallback
-works via Bash and produces equivalent output.
+@~/.claude/gsd-core/references/research-documentation-lookup.md
 </documentation_lookup>
 
 <required_reading>
-Read `~/.claude/get-shit-done/references/ai-frameworks.md` for framework profiles and known pitfalls before fetching docs.
+Read `~/.claude/gsd-core/references/ai-frameworks.md` for framework profiles and known pitfalls before fetching docs.
 </required_reading>
 
 <input>
@@ -89,7 +72,7 @@ Update AI-SPEC.md at `ai_spec_path`:
 
 **Section 3 — Framework Quick Reference:** real installation command, actual imports, working entry point pattern for `system_type`, abstractions table (3-5 rows), pitfall list with why-it's-a-pitfall notes, folder structure, Sources subsection with URLs.
 
-**Section 4 — Implementation Guidance:** specific model (e.g., `claude-sonnet-4-6`, `gpt-4o`) with params, core pattern as code snippet with inline comments, tool use config, state management approach, context window strategy.
+**Section 4 — Implementation Guidance:** specific model (e.g., `claude-sonnet-5`, `gpt-4o`) with params, core pattern as code snippet with inline comments, tool use config, state management approach, context window strategy.
 </step>
 
 <step name="write_section_4b">

@@ -11,23 +11,33 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { isSemverNewer } = require('../gsd-core/bin/lib/semver-compare.cjs');
+// Latest-version lookup is delegated to the single deterministic adapter
+// (#498). checkLatestVersion() owns the npm-view call, the timeout/semver
+// policy, and the package name — sourced from the baked Package Identity seam.
+// The previous `require('../package.json').name` (#378) resolved to undefined
+// in the installed tree (only a {"type":"commonjs"} marker ships), so the
+// background check never reported updates.
+const { checkLatestVersion } = require('../gsd-core/bin/check-latest-version.cjs');
+const { PACKAGE_NAME } = require('../gsd-core/bin/lib/package-identity.cjs');
+// Authoritative list of managed hooks — shared with tests to retire source-grep
+// assertions (pending-migration-to-typed-ir [#455]).
+// NOTE: managed-hooks-registry.cjs must be in HOOKS_TO_COPY (scripts/build-hooks.js)
+// so it is present in hooks/dist/ and ships to the installed runtime hooks/ dir.
+// If it is missing (e.g., installed from an older dist), catch and degrade gracefully
+// so the worker always proceeds to compute and write the result cache record.
+let MANAGED_HOOKS = [];
+try {
+  ({ MANAGED_HOOKS } = require('./managed-hooks-registry.cjs'));
+} catch (e) {
+  // Module not found in installed runtime — stale-hook detection degrades to
+  // no-op (empty list means no hooks are checked for staleness). The worker
+  // still runs and writes package_name / installed / latest / update_available.
+}
 
 const cacheFile = process.env.GSD_CACHE_FILE;
 const projectVersionFile = process.env.GSD_PROJECT_VERSION_FILE;
 const globalVersionFile = process.env.GSD_GLOBAL_VERSION_FILE;
-
-// Compare semver: true if a > b (a is strictly newer than b)
-// Strips pre-release suffixes (e.g. '3-beta.1' → '3') to avoid NaN from Number()
-function isNewer(a, b) {
-  const pa = (a || '').split('.').map(s => Number(s.replace(/-.*/, '')) || 0);
-  const pb = (b || '').split('.').map(s => Number(s.replace(/-.*/, '')) || 0);
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] > pb[i]) return true;
-    if (pa[i] < pb[i]) return false;
-  }
-  return false;
-}
 
 // Check project directory first (local install), then global
 let installed = '0.0.0';
@@ -46,21 +56,7 @@ try {
 // Hooks are installed at configDir/hooks/ (e.g. ~/.claude/hooks/) (#1421)
 // Only check hooks that GSD currently ships — orphaned files from removed features
 // (e.g., gsd-intel-*.js) must be ignored to avoid permanent stale warnings (#1750)
-const MANAGED_HOOKS = [
-  'gsd-check-update-worker.js',
-  'gsd-check-update.js',
-  'gsd-context-monitor.js',
-  'gsd-graphify-update.sh',
-  'gsd-phase-boundary.sh',
-  'gsd-prompt-guard.js',
-  'gsd-read-guard.js',
-  'gsd-read-injection-scanner.js',
-  'gsd-session-state.sh',
-  'gsd-statusline.js',
-  'gsd-update-banner.js',
-  'gsd-validate-commit.sh',
-  'gsd-workflow-guard.js',
-];
+// MANAGED_HOOKS is imported from ./managed-hooks-registry.cjs above.
 
 let staleHooks = [];
 if (configDir) {
@@ -75,7 +71,7 @@ if (configDir) {
           const versionMatch = content.match(/(?:\/\/|#) gsd-hook-version:\s*(.+)/);
           if (versionMatch) {
             const hookVersion = versionMatch[1].trim();
-            if (isNewer(installed, hookVersion) && !hookVersion.includes('{{')) {
+            if (isSemverNewer(installed, hookVersion) && !hookVersion.includes('{{')) {
               staleHooks.push({ file: hookFile, hookVersion, installedVersion: installed });
             }
           } else {
@@ -88,28 +84,23 @@ if (configDir) {
   } catch (e) {}
 }
 
+// Single adapter for the registry lookup (#498). checkLatestVersion() routes
+// through the shell-projection seam, which already owns the Windows shell-flag
+// policy, the timeout, and semver validation. A non-ok result leaves latest
+// null, exactly as the previous inline try/catch did.
 let latest = null;
 try {
-  latest = execFileSync('npm', ['view', 'get-shit-done-cc', 'version'], {
-    encoding: 'utf8',
-    timeout: 10000,
-    windowsHide: true,
-    // On Windows, 'npm' is distributed as npm.cmd. Node's execFileSync does
-    // not apply PATHEXT resolution and looks for a literal 'npm' binary,
-    // failing with ENOENT. Setting shell:true on Windows routes through
-    // cmd.exe which resolves npm.cmd via PATHEXT.
-    // POSIX (Linux/macOS) is left untouched — no shell spawn, no extra
-    // signal/exit-code semantics, no overhead.
-    shell: process.platform === 'win32',
-  }).trim();
+  const lv = checkLatestVersion();
+  if (lv && lv.ok) latest = lv.version;
 } catch (e) {}
 
 const result = {
-  update_available: latest && isNewer(latest, installed),
+  update_available: latest && isSemverNewer(latest, installed),
   installed,
   latest: latest || 'unknown',
   checked: Math.floor(Date.now() / 1000),
   stale_hooks: staleHooks.length > 0 ? staleHooks : undefined,
+  package_name: PACKAGE_NAME,
 };
 
 if (cacheFile) {

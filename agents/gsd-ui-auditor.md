@@ -1,8 +1,8 @@
 ---
 name: gsd-ui-auditor
 description: Retroactive 6-pillar visual audit of implemented frontend code. Produces scored UI-REVIEW.md. Spawned by /gsd:ui-review orchestrator.
-tools: Read, Write, Bash, Grep, Glob
-color: "#F472B6"
+tools: Read, Write, Bash, Grep, Glob, Skill
+color: pink
 # hooks:
 #   PostToolUse:
 #     - matcher: "Write|Edit"
@@ -49,6 +49,8 @@ Before auditing, discover project context:
 **Project instructions:** Read `./CLAUDE.md` if it exists in the working directory. Follow all project-specific guidelines.
 
 **Project skills:** Check `.claude/skills/` or `.agents/skills/` directory if either exists:
+
+**agent_skills:** self-load per @~/.claude/gsd-core/references/agent-skills-bootstrap.md
 1. List available skills (subdirectories)
 2. Read `SKILL.md` for each skill
 3. Do NOT load full `AGENTS.md` files (100KB+ context cost)

@@ -12,9 +12,14 @@ on:
           - rc
           - finalize
       version:
-        description: 'Version (e.g., 1.28.0 or 2.0.0)'
+        description: 'Version: X.Y.0 (minor/major) or X.Y.Z with Z>0 (hotfix/patch)'
         required: true
         type: string
+      auto_cherry_pick:
+        description: 'Hotfix create only: auto-cherry-pick fix:/chore: commits from origin/next (fallback origin/main) since base tag'
+        required: false
+        type: boolean
+        default: true
       dry_run:
         description: 'Dry run (skip npm publish, tagging, and push)'
         required: false
@@ -37,6 +42,8 @@ jobs:
     outputs:
       branch: ${{ steps.validate.outputs.branch }}
       is_major: ${{ steps.validate.outputs.is_major }}
+      is_hotfix: ${{ steps.validate.outputs.is_hotfix }}
+      base_tag: ${{ steps.validate.outputs.base_tag }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -46,26 +53,61 @@ jobs:
         id: validate
         env:
           VERSION: ${{ inputs.version }}
+          ACTION: ${{ inputs.action }}
         run: |
-          # Must be X.Y.0 (minor or major release, not patch)
-          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.0$'; then
-            echo "::error::Version must end in .0 (e.g., 1.28.0 or 2.0.0). Use hotfix workflow for patch releases."
-            exit 1
-          fi
-          BRANCH="release/${VERSION}"
-          # Detect major (X.0.0)
+          set -euo pipefail
+          IS_HOTFIX="false"
           IS_MAJOR="false"
-          if echo "$VERSION" | grep -qE '^[0-9]+\.0\.0$'; then
-            IS_MAJOR="true"
+          BASE_TAG=""
+          if echo "$VERSION" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.0$'; then
+            # Minor or major release (X.Y.0)
+            BRANCH="release/${VERSION}"
+            if echo "$VERSION" | grep -qE '^(0|[1-9][0-9]*)\.0\.0$'; then
+              IS_MAJOR="true"
+            fi
+          elif echo "$VERSION" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.[1-9][0-9]*$'; then
+            # Patch / hotfix release (X.Y.Z, Z>0)
+            IS_HOTFIX="true"
+            if [ "$ACTION" = "rc" ]; then
+              echo "::error::Hotfix (patch) releases skip the rc action — run create, then finalize."
+              exit 1
+            fi
+            BRANCH="hotfix/${VERSION}"
+            MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1-2)
+            TARGET_TAG="v${VERSION}"
+            # semver-correct base tag: highest vMAJOR_MINOR.* strictly below TARGET_TAG
+            BASE_TAG=$( ( git tag -l "v${MAJOR_MINOR}.*" | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$"; echo "$TARGET_TAG" ) \
+              | sort -V \
+              | awk -v target="$TARGET_TAG" '$1 == target { print prev; exit } { prev = $1 }')
+            if [ -z "$BASE_TAG" ]; then
+              echo "::error::No prior stable tag found for ${MAJOR_MINOR}.x before $TARGET_TAG"
+              exit 1
+            fi
+          else
+            echo "::error::Version '$VERSION' is invalid. Use X.Y.0 (minor/major) or X.Y.Z with Z>0 (hotfix), no leading zeros."
+            exit 1
           fi
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "is_major=$IS_MAJOR" >> "$GITHUB_OUTPUT"
+          echo "is_hotfix=$IS_HOTFIX" >> "$GITHUB_OUTPUT"
+          echo "base_tag=$BASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Reject already-published versions
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          for pkg in @opengsd/gsd-core; do
+            if npm view "$pkg@$VERSION" version >/dev/null 2>&1; then
+              echo "::error::$pkg@$VERSION is already published on npm — bump to a new version"
+              exit 1
+            fi
+          done
 
   create:
     needs: validate-version
     if: inputs.action == 'create'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -76,6 +118,10 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies and build
+        run: npm ci --silent && npm run build:lib
 
       - name: Check branch doesn't already exist
         env:
@@ -92,6 +138,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Create release branch
+        if: needs.validate-version.outputs.is_hotfix != 'true'
         env:
           BRANCH: ${{ needs.validate-version.outputs.branch }}
           VERSION: ${{ inputs.version }}
@@ -99,8 +146,7 @@ jobs:
         run: |
           git checkout -b "$BRANCH"
           npm version "$VERSION" --no-git-tag-version
-          cd sdk && npm version "$VERSION" --no-git-tag-version && cd ..
-          git add package.json package-lock.json sdk/package.json
+          git add package.json package-lock.json
           git commit -m "chore: bump version to ${VERSION} for release"
           git push origin "$BRANCH"
           echo "## Release branch created" >> "$GITHUB_STEP_SUMMARY"
@@ -113,6 +159,152 @@ jobs:
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Next: run this workflow with \`rc\` action to publish a pre-release to \`next\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create hotfix branch from base tag (skeleton)
+        if: needs.validate-version.outputs.is_hotfix == 'true'
+        env:
+          BRANCH: ${{ needs.validate-version.outputs.branch }}
+          BASE_TAG: ${{ needs.validate-version.outputs.base_tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git checkout -b "$BRANCH" "$BASE_TAG"
+          # Push the skeleton up-front so a later cherry-pick conflict leaves a
+          # remote artefact the operator can fetch, resolve, and re-push.
+          if [ "$DRY_RUN" != "true" ]; then
+            git push -u origin "$BRANCH"
+          fi
+
+      - name: Cherry-pick fix/chore commits from origin/next since base tag
+        if: ${{ needs.validate-version.outputs.is_hotfix == 'true' && inputs.auto_cherry_pick }}
+        env:
+          BRANCH: ${{ needs.validate-version.outputs.branch }}
+          BASE_TAG: ${{ needs.validate-version.outputs.base_tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          # Under the next-branch model, day-to-day fixes land on `next` first
+          # and only reach `main` via release back-merge. So `next` is the
+          # canonical cherry-pick source. Fall back to `main` if `next` doesn't
+          # exist yet (legacy single-branch repos) or as a transition guard.
+          if git ls-remote --exit-code origin next >/dev/null 2>&1; then
+            git fetch origin next:refs/remotes/origin/next
+            SOURCE="origin/next"
+          else
+            git fetch origin main:refs/remotes/origin/main
+            SOURCE="origin/main"
+          fi
+          echo "Cherry-pick source: $SOURCE"
+
+          # `git cherry $BASE_TAG $SOURCE` lists every commit on the source not
+          # patch-equivalent in BASE_TAG. + means needs picking, - means
+          # already applied (skipped silently).
+          CANDIDATES=$(git cherry "$BASE_TAG" "$SOURCE" | awk '/^\+ / {print $2}')
+
+          if [ -z "$CANDIDATES" ]; then
+            echo "No commits on $SOURCE beyond $BASE_TAG."
+            echo "## Cherry-pick summary" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Base: \`$BASE_TAG\` (source: \`$SOURCE\`) — no commits to consider." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Re-order chronologically (oldest first) for predictable application.
+          ORDERED=$(git log --reverse --format='%H' "$BASE_TAG..$SOURCE" \
+            | grep -F -f <(echo "$CANDIDATES") || true)
+
+          INCLUDED=""
+          SKIPPED=""
+          while IFS= read -r SHA; do
+            [ -z "$SHA" ] && continue
+            SUBJECT=$(git log -1 --format='%s' "$SHA")
+            # fix: or chore:, optional scope, optional ! breaking marker
+            if echo "$SUBJECT" | grep -qE '^(fix|chore)(\([^)]+\))?!?: '; then
+              echo "→ cherry-picking $SHA  $SUBJECT"
+              if ! git cherry-pick -x "$SHA"; then
+                # Abort restores HEAD to the last successful pick. On real
+                # runs, push that state so the operator can fetch, resolve
+                # $SHA manually, and finalize with auto_cherry_pick=false.
+                git cherry-pick --abort || true
+                if [ "$DRY_RUN" != "true" ]; then
+                  git push --force-with-lease origin "$BRANCH" || git push origin "$BRANCH" || true
+                fi
+                {
+                  echo "## Cherry-pick conflict"
+                  echo ""
+                  echo "Failed at: \`${SHA}\` — \`${SUBJECT}\`"
+                  echo ""
+                  if [ "$DRY_RUN" = "true" ]; then
+                    echo "**Dry run:** branch was not pushed, so the picks below were discarded with the runner."
+                    if [ -n "$INCLUDED" ]; then
+                      echo ""
+                      echo "Already-applied picks (lost — must be re-applied before resolving \`${SHA}\`):"
+                      echo ""
+                      echo "$INCLUDED"
+                    fi
+                    echo ""
+                    echo "**To resolve:** re-run \`create\` with \`auto_cherry_pick=true\` (real, not dry-run) to materialize the partial branch on origin, then resolve \`${SHA}\` manually. Re-running with \`auto_cherry_pick=false\` would recreate the branch from \`${BASE_TAG}\` and lose every pick listed above."
+                  else
+                    echo "Branch \`${BRANCH}\` was pushed with picks applied up to (but not including) the conflicting commit."
+                    echo ""
+                    echo "**To resolve:** \`git fetch origin && git checkout ${BRANCH} && git cherry-pick -x ${SHA}\`, fix the conflict, push, then re-run \`finalize\` with \`auto_cherry_pick=false\`."
+                  fi
+                } >> "$GITHUB_STEP_SUMMARY"
+                echo "::error::Cherry-pick of $SHA failed. See summary."
+                exit 1
+              fi
+              INCLUDED="${INCLUDED}- \`${SHA}\` ${SUBJECT}"$'\n'
+            else
+              echo "  skip $SHA  $SUBJECT  (not fix/chore)"
+              SKIPPED="${SKIPPED}- \`${SHA}\` ${SUBJECT}"$'\n'
+            fi
+          done <<< "$ORDERED"
+
+          {
+            echo "## Cherry-pick summary"
+            echo ""
+            echo "Base: \`$BASE_TAG\`"
+            echo ""
+            if [ -n "$INCLUDED" ]; then
+              echo "### Included (fix/chore)"
+              echo ""
+              echo "$INCLUDED"
+            else
+              echo "_No fix/chore commits to include._"
+              echo ""
+            fi
+            if [ -n "$SKIPPED" ]; then
+              echo "### Skipped (feat/refactor/etc — not auto-included)"
+              echo ""
+              echo "$SKIPPED"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bump hotfix version and push
+        if: needs.validate-version.outputs.is_hotfix == 'true'
+        env:
+          BRANCH: ${{ needs.validate-version.outputs.branch }}
+          BASE_TAG: ${{ needs.validate-version.outputs.base_tag }}
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          npm version "$VERSION" --no-git-tag-version
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to $VERSION for hotfix"
+          if [ "$DRY_RUN" != "true" ]; then
+            git push origin "$BRANCH"
+          else
+            echo "DRY RUN — branch not pushed."
+          fi
+          {
+            echo "## Hotfix branch created"
+            echo ""
+            echo "- Branch: \`$BRANCH\`"
+            echo "- Based on: \`$BASE_TAG\`"
+            echo "- Apply additional manual fixes if needed, then run \`finalize\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   install-smoke-rc:
     needs: validate-version
@@ -127,7 +319,7 @@ jobs:
     needs: [validate-version, install-smoke-rc]
     if: inputs.action == 'rc'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
@@ -170,37 +362,55 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Install dependencies and build
+        run: npm ci --silent && npm run build:lib
+
       - name: Bump to pre-release version
         env:
           PRE_VERSION: ${{ steps.prerelease.outputs.pre_version }}
         run: |
           npm version "$PRE_VERSION" --no-git-tag-version
-          cd sdk && npm version "$PRE_VERSION" --no-git-tag-version && cd ..
 
       - name: Install and test
         run: |
           npm ci
-          npm run test:coverage
+          node scripts/check-npm-integrity.cjs
+          npm run test:coverage:unit
+
+      - name: Preview CHANGELOG (non-destructive)
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # Non-destructive CHANGELOG preview for the version under test (#759):
+          # renders the curated section finalize will promote, without writing
+          # CHANGELOG.md or consuming .changeset fragments. Surfaced in the job
+          # summary so RC testers see the upcoming release notes.
+          #
+          # Render to a file as a standalone command so a non-zero exit (e.g. a
+          # malformed fragment) fails the step. The default GitHub Linux shell
+          # is `bash -e` without pipefail, so a `node | tee` pipeline would mask
+          # a node failure behind tee's exit 0.
+          PREVIEW_FILE="${RUNNER_TEMP:-/tmp}/changelog-preview.md"
+          node scripts/changeset/cli.cjs render \
+            --version "$VERSION" --date "$(date -u +%F)" --preview > "$PREVIEW_FILE"
+          {
+            echo "### CHANGELOG preview for v${VERSION} (not yet promoted)"
+            echo ''
+            cat "$PREVIEW_FILE"
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          cat "$PREVIEW_FILE"
 
       - name: Commit pre-release version bump
         env:
           PRE_VERSION: ${{ steps.prerelease.outputs.pre_version }}
         run: |
-          git add package.json package-lock.json sdk/package.json
+          git add package.json package-lock.json
           git commit -m "chore: bump to ${PRE_VERSION}"
 
-      - name: Build SDK dist for tarball
-        run: npm run build:sdk
-
-      - name: Verify tarball ships sdk/dist/cli.js (bug #2647)
-        run: bash scripts/verify-tarball-sdk-dist.sh
+      # npm bundled with Node 24 (pinned via setup-node) already supports trusted publishing (#318)
 
       - name: Dry-run publish validation
-        run: |
-          npm publish --dry-run --tag next
-          cd sdk && npm publish --dry-run --tag next
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --dry-run --tag next
 
       - name: Tag and push
         if: ${{ !inputs.dry_run }}
@@ -223,15 +433,8 @@ jobs:
 
       - name: Publish to npm (next)
         if: ${{ !inputs.dry_run }}
+        # --provenance is automatic under OIDC trusted publishing
         run: npm publish --provenance --access public --tag next
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish SDK to npm (next)
-        if: ${{ !inputs.dry_run }}
-        run: cd sdk && npm publish --provenance --access public --tag next
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub pre-release
         if: ${{ !inputs.dry_run }}
@@ -243,28 +446,37 @@ jobs:
             --title "v${PRE_VERSION}" \
             --generate-notes \
             --prerelease
+          # Reformat the auto-generated notes into the curated
+          # Install + Feature/Enhancement/Fix format.
+          node scripts/release-notes/format-github-release-notes.cjs \
+            --tag "v${PRE_VERSION}" --prerelease --apply
+
+      - name: Post Discord pre-release announcement
+        if: ${{ !inputs.dry_run }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_CHANGELOG_WEBHOOK }}
+          GH_TOKEN: ${{ github.token }}
+          PRE_VERSION: ${{ steps.prerelease.outputs.pre_version }}
+        run: |
+          node scripts/release-notes/discord-release-summary.cjs \
+            --tag "v${PRE_VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --post \
+            --allow-missing-webhook
 
       - name: Verify publish
         if: ${{ !inputs.dry_run }}
         env:
           PRE_VERSION: ${{ steps.prerelease.outputs.pre_version }}
-        run: |
-          sleep 10
-          PUBLISHED=$(npm view get-shit-done-cc@"$PRE_VERSION" version 2>/dev/null || echo "NOT_FOUND")
-          if [ "$PUBLISHED" != "$PRE_VERSION" ]; then
-            echo "::error::Published version verification failed. Expected $PRE_VERSION, got $PUBLISHED"
-            exit 1
-          fi
-          echo "✓ Verified: get-shit-done-cc@$PRE_VERSION is live on npm"
-          SDK_PUBLISHED=$(npm view @gsd-build/sdk@"$PRE_VERSION" version 2>/dev/null || echo "NOT_FOUND")
-          if [ "$SDK_PUBLISHED" != "$PRE_VERSION" ]; then
-            echo "::error::SDK version verification failed. Expected $PRE_VERSION, got $SDK_PUBLISHED"
-            exit 1
-          fi
-          echo "✓ Verified: @gsd-build/sdk@$PRE_VERSION is live on npm"
-          # Also verify dist-tag
-          NEXT_TAG=$(npm dist-tag ls get-shit-done-cc 2>/dev/null | grep "next:" | awk '{print $2}')
-          echo "✓ next tag points to: $NEXT_TAG"
+        run: node scripts/verify-npm-publish.cjs --package @opengsd/gsd-core --version "$PRE_VERSION" --dist-tag next
+
+      - name: Sync next branch to the published pre-release
+        if: ${{ !inputs.dry_run }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GSD_BOT_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          PRE_VERSION: ${{ steps.prerelease.outputs.pre_version }}
+        run: node scripts/sync-next-version.cjs "$PRE_VERSION"
 
       - name: Summary
         env:
@@ -276,8 +488,7 @@ jobs:
             echo "**DRY RUN** — npm publish, tagging, and push skipped" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- Published to npm as \`next\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "- SDK also published: \`@gsd-build/sdk@${PRE_VERSION}\` on \`next\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Install: \`npx get-shit-done-cc@next\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Install: \`npx @opengsd/gsd-core@next\`" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "To publish another pre-release: run \`rc\` again" >> "$GITHUB_STEP_SUMMARY"
@@ -296,7 +507,10 @@ jobs:
     needs: [validate-version, install-smoke-finalize]
     if: inputs.action == 'finalize'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Matches the rc job's budget: `npm ci` + `npm run test:coverage:unit` now
+    # exceeds 10m as the unit suite grows, so a 10m cap cancels the job mid-test
+    # before tag/publish. 30m gives the same headroom rc already relies on.
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: write
@@ -319,38 +533,59 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Install dependencies and build
+        run: npm ci --silent && npm run build:lib
+
       - name: Set final version
         env:
           VERSION: ${{ inputs.version }}
         run: |
           npm version "$VERSION" --no-git-tag-version --allow-same-version
-          cd sdk && npm version "$VERSION" --no-git-tag-version --allow-same-version && cd ..
-          git add package.json package-lock.json sdk/package.json
+          git add package.json package-lock.json
           git diff --cached --quiet || git commit -m "chore: finalize v${VERSION}"
 
       - name: Install and test
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: |
           npm ci
-          npm run test:coverage
+          node scripts/check-npm-integrity.cjs
+          npm run test:coverage:unit
 
-      - name: Build SDK dist for tarball
-        run: npm run build:sdk
+      - name: Promote CHANGELOG (render fragments)
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          node scripts/changeset/cli.cjs render \
+            --version "$VERSION" --date "$(date -u +%F)" --allow-empty
+          git add -A .changeset CHANGELOG.md
+          # Diff-preview guard: surface exactly what was promoted, in the log and
+          # the job summary, before the commit lands.
+          {
+            echo "### CHANGELOG promotion for v${VERSION}"
+            echo '```diff'
+            git diff --cached -- CHANGELOG.md
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          git --no-pager diff --cached -- CHANGELOG.md
+          git diff --cached --quiet || git commit -m "chore: promote CHANGELOG for v${VERSION}"
 
-      - name: Verify tarball ships sdk/dist/cli.js (bug #2647)
-        run: bash scripts/verify-tarball-sdk-dist.sh
+      - name: Verify CHANGELOG promoted
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          node scripts/changeset/cli.cjs verify --version "$VERSION" --changelog CHANGELOG.md
+
+      # npm bundled with Node 24 (pinned via setup-node) already supports trusted publishing (#318)
 
       - name: Dry-run publish validation
-        run: |
-          npm publish --dry-run
-          cd sdk && npm publish --dry-run
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --dry-run
 
       - name: Create PR to merge release back to main
         if: ${{ !inputs.dry_run }}
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GSD_BOT_PR_TOKEN || secrets.GITHUB_TOKEN }}
           BRANCH: ${{ needs.validate-version.outputs.branch }}
           VERSION: ${{ inputs.version }}
         run: |
@@ -397,15 +632,8 @@ jobs:
 
       - name: Publish to npm (latest)
         if: ${{ !inputs.dry_run }}
+        # --provenance is automatic under OIDC trusted publishing
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish SDK to npm (latest)
-        if: ${{ !inputs.dry_run }}
-        run: cd sdk && npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         if: ${{ !inputs.dry_run }}
@@ -417,40 +645,29 @@ jobs:
             --title "v${VERSION}" \
             --generate-notes \
             --latest
+          # Reformat the auto-generated notes into the curated
+          # Install + Feature/Enhancement/Fix format.
+          node scripts/release-notes/format-github-release-notes.cjs \
+            --tag "v${VERSION}" --latest --apply
 
-      - name: Clean up next dist-tag
+      - name: Post Discord release announcement
         if: ${{ !inputs.dry_run }}
         env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_CHANGELOG_WEBHOOK }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          # Point next to the stable release so @next never returns something
-          # older than @latest. This prevents stale pre-release installs.
-          npm dist-tag add "get-shit-done-cc@${VERSION}" next 2>/dev/null || true
-          npm dist-tag add "@gsd-build/sdk@${VERSION}" next 2>/dev/null || true
-          echo "✓ next dist-tag updated to v${VERSION}"
+          node scripts/release-notes/discord-release-summary.cjs \
+            --tag "v${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --post \
+            --allow-missing-webhook
 
       - name: Verify publish
         if: ${{ !inputs.dry_run }}
         env:
           VERSION: ${{ inputs.version }}
-        run: |
-          sleep 10
-          PUBLISHED=$(npm view get-shit-done-cc@"$VERSION" version 2>/dev/null || echo "NOT_FOUND")
-          if [ "$PUBLISHED" != "$VERSION" ]; then
-            echo "::error::Published version verification failed. Expected $VERSION, got $PUBLISHED"
-            exit 1
-          fi
-          echo "✓ Verified: get-shit-done-cc@$VERSION is live on npm"
-          SDK_PUBLISHED=$(npm view @gsd-build/sdk@"$VERSION" version 2>/dev/null || echo "NOT_FOUND")
-          if [ "$SDK_PUBLISHED" != "$VERSION" ]; then
-            echo "::error::SDK version verification failed. Expected $VERSION, got $SDK_PUBLISHED"
-            exit 1
-          fi
-          echo "✓ Verified: @gsd-build/sdk@$VERSION is live on npm"
-          # Verify latest tag
-          LATEST_TAG=$(npm dist-tag ls get-shit-done-cc 2>/dev/null | grep "latest:" | awk '{print $2}')
-          echo "✓ latest tag points to: $LATEST_TAG"
+        run: node scripts/verify-npm-publish.cjs --package @opengsd/gsd-core --version "$VERSION" --dist-tag latest
 
       - name: Summary
         env:
@@ -462,8 +679,7 @@ jobs:
             echo "**DRY RUN** — npm publish, tagging, and push skipped" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- Published to npm as \`latest\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "- SDK also published: \`@gsd-build/sdk@${VERSION}\` as \`latest\`" >> "$GITHUB_STEP_SUMMARY"
             echo "- Tagged \`v${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
             echo "- PR created to merge back to main" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Install: \`npx get-shit-done-cc@latest\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Install: \`npx @opengsd/gsd-core@latest\`" >> "$GITHUB_STEP_SUMMARY"
           fi

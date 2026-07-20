@@ -15,12 +15,15 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const MANIFEST_PATH = path.join(ROOT, 'docs', 'INVENTORY-MANIFEST.json');
 
+// The `agents` row is NOT swapped to the shared listAgentFiles() helper: it is one
+// row in a uniform multi-family table (each with its own filter/toName + an isFile
+// guard); folding only agents in would break that uniformity.
 const FAMILIES = [
   { name: 'agents',      dir: path.join(ROOT, 'agents'),                           filter: (f) => /^gsd-.*\.md$/.test(f),  toName: (f) => f.replace(/\.md$/, '') },
   { name: 'commands',    dir: path.join(ROOT, 'commands', 'gsd'),                  filter: (f) => f.endsWith('.md'),        toName: (f) => '/gsd-' + f.replace(/\.md$/, '') },
-  { name: 'workflows',   dir: path.join(ROOT, 'get-shit-done', 'workflows'),        filter: (f) => f.endsWith('.md'),        toName: (f) => f },
-  { name: 'references',  dir: path.join(ROOT, 'get-shit-done', 'references'),       filter: (f) => f.endsWith('.md'),        toName: (f) => f },
-  { name: 'cli_modules', dir: path.join(ROOT, 'get-shit-done', 'bin', 'lib'),       filter: (f) => f.endsWith('.cjs'),       toName: (f) => f },
+  { name: 'workflows',   dir: path.join(ROOT, 'gsd-core', 'workflows'),        filter: (f) => f.endsWith('.md'),        toName: (f) => f },
+  { name: 'references',  dir: path.join(ROOT, 'gsd-core', 'references'),       filter: (f) => f.endsWith('.md'),        toName: (f) => f },
+  { name: 'cli_modules', dir: path.join(ROOT, 'gsd-core', 'bin', 'lib'),       filter: (f) => f.endsWith('.cjs'),       toName: (f) => f },
   { name: 'hooks',       dir: path.join(ROOT, 'hooks'),                             filter: (f) => /\.(js|sh)$/.test(f),    toName: (f) => f },
 ];
 

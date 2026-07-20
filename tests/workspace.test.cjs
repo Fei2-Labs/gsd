@@ -9,10 +9,9 @@ const { test, describe, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { execSync } = require('child_process');
 const { runGsdTools, createTempProject, createTempDir, cleanup } = require('./helpers.cjs');
-const { detectChildRepos } = require('../get-shit-done/bin/lib/init.cjs');
+const { detectChildRepos } = require('../gsd-core/bin/lib/init.cjs');
 
 // ─── detectChildRepos ────────────────────────────────────────────────────────
 
@@ -328,11 +327,11 @@ describe('workspace command files', () => {
   function parseCommandFile(filePath) {
     // Strip UTF-8 BOM if present (some editors inject on save under Windows);
     // a BOM byte at offset 0 defeats the ^--- anchor, making fmMatch null.
-    const raw = fs.readFileSync(filePath, 'utf8').replace(/^﻿/, '');
+    const raw = fs.readFileSync(filePath, 'utf8').replace(/^\ufeff/, '');
     const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
     assert.ok(fmMatch, `${path.basename(filePath)} must start with a YAML frontmatter block`);
     const fm = {};
-    for (const rawLine of fmMatch[1].split('\n')) {
+    for (const rawLine of fmMatch[1].split(/\r?\n/)) {
       // Explicit \r strip: split('\n') on CRLF content leaves a trailing
       // \r on every line, which the value regex pulls into `kv[2]` and trim
       // is enough for most values — but be defensive so future keys with
@@ -350,7 +349,7 @@ describe('workspace command files', () => {
 
   /**
    * Extract `@`-include targets from any of the <execution_context*> blocks.
-   * Each line of the form `@~/.claude/get-shit-done/workflows/foo.md` becomes
+   * Each line of the form `@~/.claude/gsd-core/workflows/foo.md` becomes
    * a relative target like `workflows/foo.md`. Used to assert workflow
    * routing structurally instead of substring-matching prose.
    */
@@ -359,12 +358,12 @@ describe('workspace command files', () => {
       .map((m) => m[1]);
     const targets = [];
     for (const blk of blocks) {
-      for (const line of blk.split('\n')) {
+      for (const line of blk.split(/\r?\n/)) {
         const t = line.trim();
         if (!t.startsWith('@')) continue;
-        // Normalize away the home-prefix and the `.claude/get-shit-done/` root
+        // Normalize away the home-prefix and the `.claude/gsd-core/` root
         // so the test only cares about the workflow path tail.
-        const rel = t.replace(/^@~?\/?(?:\.claude\/)?(?:get-shit-done\/)?/, '');
+        const rel = t.replace(/^@~?\/?(?:\.claude\/)?(?:gsd-core\/)?/, '');
         targets.push(rel);
       }
     }
@@ -421,7 +420,7 @@ describe('workspace command files', () => {
   });
 
   test('new-workspace workflow exists', () => {
-    const content = fs.readFileSync(path.join(baseDir, 'get-shit-done/workflows/new-workspace.md'), 'utf8');
+    const content = fs.readFileSync(path.join(baseDir, 'gsd-core/workflows/new-workspace.md'), 'utf8');
     assert.ok(
       content.includes('init new-workspace') || content.includes('init.new-workspace'),
       'expected init new-workspace (CJS) or gsd-sdk query init.new-workspace'
@@ -432,7 +431,7 @@ describe('workspace command files', () => {
   });
 
   test('list-workspaces workflow exists', () => {
-    const content = fs.readFileSync(path.join(baseDir, 'get-shit-done/workflows/list-workspaces.md'), 'utf8');
+    const content = fs.readFileSync(path.join(baseDir, 'gsd-core/workflows/list-workspaces.md'), 'utf8');
     assert.ok(
       content.includes('init list-workspaces') || content.includes('init.list-workspaces'),
       'expected init list-workspaces or gsd-sdk query init.list-workspaces'
@@ -440,7 +439,7 @@ describe('workspace command files', () => {
   });
 
   test('remove-workspace workflow exists', () => {
-    const content = fs.readFileSync(path.join(baseDir, 'get-shit-done/workflows/remove-workspace.md'), 'utf8');
+    const content = fs.readFileSync(path.join(baseDir, 'gsd-core/workflows/remove-workspace.md'), 'utf8');
     assert.ok(
       content.includes('init remove-workspace') || content.includes('init.remove-workspace'),
       'expected init remove-workspace or gsd-sdk query init.remove-workspace'

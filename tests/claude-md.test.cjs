@@ -37,7 +37,7 @@ describe('generate-claude-md', () => {
     assert.strictEqual(output.sections_total, 6);
     assert.ok(output.sections_generated.includes('workflow'));
 
-    const claudePath = path.join(tmpDir, 'CLAUDE.md');
+    const claudePath = path.join(tmpDir, '.claude', 'CLAUDE.md');
     const content = fs.readFileSync(claudePath, 'utf-8');
     assert.ok(content.includes('## GSD Workflow Enforcement'));
     // #3584: generated CLAUDE.md must emit the runtime-routable hyphen-form
@@ -51,27 +51,81 @@ describe('generate-claude-md', () => {
     assert.ok(content.includes('Do not make direct repo edits outside a GSD workflow'));
   });
 
-  test('adds workflow enforcement section when updating an existing CLAUDE.md', () => {
+  test('adds workflow enforcement section when force-updating an existing marker-less CLAUDE.md', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'PROJECT.md'),
       '# Test Project\n\n## What This Is\n\nA small test project.\n'
     );
-    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '## Local Notes\n\nKeep this intro.\n');
+    // #1098: a hand-crafted file (no GSD markers) is only overwritten with --force.
+    fs.mkdirSync(path.join(tmpDir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), '## Local Notes\n\nKeep this intro.\n');
 
-    const result = runGsdTools('generate-claude-md', tmpDir);
+    const result = runGsdTools('generate-claude-md --force', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
     const output = JSON.parse(result.output);
     assert.strictEqual(output.action, 'updated');
 
-    const content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     assert.ok(content.includes('## Local Notes'));
     assert.ok(content.includes('## GSD Workflow Enforcement'));
+  });
+
+  test('#1098: does NOT clobber an existing marker-less CLAUDE.md without --force', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'PROJECT.md'),
+      '# Test Project\n\n## What This Is\n\nA small test project.\n'
+    );
+    const handCrafted = '## My Hand-Crafted Instructions\n\nDo exactly what I say.\n';
+    fs.mkdirSync(path.join(tmpDir, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), handCrafted);
+
+    const result = runGsdTools('generate-claude-md', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const output = JSON.parse(result.output);
+    assert.strictEqual(output.action, 'skipped', 'must skip a hand-crafted file without --force');
+
+    const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
+    assert.strictEqual(content, handCrafted, 'hand-crafted file must be left byte-identical');
+    assert.ok(!content.includes('## GSD Workflow Enforcement'), 'GSD sections must NOT be injected');
+  });
+
+  test('#1098: updates an existing GSD-managed CLAUDE.md (has markers) without --force', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'PROJECT.md'),
+      '# Test Project\n\n## What This Is\n\nA small test project.\n'
+    );
+    // First generation creates a GSD-managed file (with markers).
+    const first = runGsdTools('generate-claude-md', tmpDir);
+    assert.ok(first.success, `Command failed: ${first.error}`);
+    assert.strictEqual(JSON.parse(first.output).action, 'created');
+
+    // Re-running updates it in place — markers present, so no --force needed.
+    const second = runGsdTools('generate-claude-md', tmpDir);
+    assert.ok(second.success, `Command failed: ${second.error}`);
+    assert.strictEqual(JSON.parse(second.output).action, 'updated');
+  });
+
+  test('#1098: defaults the Claude-runtime output to .claude/CLAUDE.md (not repo root)', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'PROJECT.md'),
+      '# Test Project\n\n## What This Is\n\nA small test project.\n'
+    );
+    const result = runGsdTools('generate-claude-md', tmpDir);
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const output = JSON.parse(result.output);
+    assert.ok(
+      output.claude_md_path.replace(/\\/g, '/').endsWith('/.claude/CLAUDE.md'),
+      `default output must be .claude/CLAUDE.md; got ${output.claude_md_path}`
+    );
+    assert.ok(!fs.existsSync(path.join(tmpDir, 'CLAUDE.md')), 'must NOT create a repo-root CLAUDE.md');
+    assert.ok(fs.existsSync(path.join(tmpDir, '.claude', 'CLAUDE.md')), 'must create .claude/CLAUDE.md');
   });
 });
 
 describe('new-project workflow includes CLAUDE.md generation', () => {
-  const workflowPath = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'new-project.md');
+  const workflowPath = path.join(__dirname, '..', 'gsd-core', 'workflows', 'new-project.md');
   const commandsPath = path.join(__dirname, '..', 'docs', 'COMMANDS.md');
 
   test('new-project workflow generates instruction file before final commit', () => {
@@ -117,7 +171,7 @@ describe('generate-claude-md skills section', () => {
     const output = JSON.parse(result.output);
     assert.ok(output.sections_fallback.includes('skills'));
 
-    const content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     assert.ok(content.includes('<!-- GSD:skills-start'));
     assert.ok(content.includes('<!-- GSD:skills-end -->'));
     assert.ok(content.includes('No project skills found. Add skills to any of'));
@@ -138,7 +192,7 @@ describe('generate-claude-md skills section', () => {
     assert.ok(output.sections_generated.includes('skills'));
     assert.ok(!output.sections_fallback.includes('skills'));
 
-    const content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     assert.ok(content.includes('api-payments'));
     assert.ok(content.includes('Payment gateway integration'));
     assert.ok(content.includes('## Project Skills'));
@@ -155,7 +209,7 @@ describe('generate-claude-md skills section', () => {
     const result = runGsdTools('generate-claude-md', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
-    const content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     assert.ok(content.includes('data-sync'));
     assert.ok(content.includes('ERP synchronization flows'));
   });
@@ -169,25 +223,30 @@ describe('generate-claude-md skills section', () => {
     );
 
     const homeDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'gsd-claude-skills-home-'));
-    fs.mkdirSync(path.join(homeDir, '.claude', 'get-shit-done', 'skills', 'import-only'), { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.claude', 'gsd-core', 'skills', 'import-only'), { recursive: true });
     fs.writeFileSync(
-      path.join(homeDir, '.claude', 'get-shit-done', 'skills', 'import-only', 'SKILL.md'),
+      path.join(homeDir, '.claude', 'gsd-core', 'skills', 'import-only', 'SKILL.md'),
       '---\nname: import-only\ndescription: Deprecated import-only skill.\n---\n'
     );
 
     const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
     process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
 
     try {
       const result = runGsdTools('generate-claude-md', tmpDir);
       assert.ok(result.success, `Command failed: ${result.error}`);
 
-      const content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+      const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
       assert.ok(content.includes('automation'));
       assert.ok(content.includes('Project Codex skill'));
       assert.ok(!content.includes('import-only'));
     } finally {
-      process.env.HOME = originalHome;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = originalUserProfile;
       cleanup(homeDir);
     }
   });
@@ -209,7 +268,7 @@ describe('generate-claude-md skills section', () => {
     const result = runGsdTools('generate-claude-md', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
-    const content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     assert.ok(!content.includes('gsd-plan-phase'));
     assert.ok(content.includes('my-feature'));
     assert.ok(content.includes('Custom project skill'));
@@ -226,7 +285,7 @@ describe('generate-claude-md skills section', () => {
     const result = runGsdTools('generate-claude-md', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
-    const content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     assert.ok(content.includes('First line of description'));
     assert.ok(content.includes('Continued on second line'));
     assert.ok(content.includes('And a third line'));
@@ -245,7 +304,7 @@ describe('generate-claude-md skills section', () => {
     const result = runGsdTools('generate-claude-md', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
-    const content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     const matches = content.match(/shared-skill/g);
     // Should appear exactly twice: once in name column, once in path column (single row)
     assert.strictEqual(matches.length, 2);
@@ -254,7 +313,7 @@ describe('generate-claude-md skills section', () => {
   test('updates existing skills section on regeneration', () => {
     // First generation — no skills
     runGsdTools('generate-claude-md', tmpDir);
-    let content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    let content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     assert.ok(content.includes('No project skills found'));
 
     // Add a skill and regenerate
@@ -268,7 +327,7 @@ describe('generate-claude-md skills section', () => {
     const result = runGsdTools('generate-claude-md', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
-    content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     assert.ok(!content.includes('No project skills found'));
     assert.ok(content.includes('new-skill'));
     assert.ok(content.includes('Just added'));
@@ -285,7 +344,7 @@ describe('generate-claude-md skills section', () => {
     const result = runGsdTools('generate-claude-md', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
 
-    const content = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(tmpDir, '.claude', 'CLAUDE.md'), 'utf-8');
     const archIdx = content.indexOf('## Architecture');
     const skillsIdx = content.indexOf('## Project Skills');
     const workflowIdx = content.indexOf('## GSD Workflow Enforcement');
@@ -293,3 +352,139 @@ describe('generate-claude-md skills section', () => {
     assert.ok(skillsIdx < workflowIdx, 'Skills section should come before Workflow Enforcement');
   });
 });
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Folded from tests/bug-3163-codex-agents-md.test.cjs — consolidation epic #1969 (B2 #1971)
+// ────────────────────────────────────────────────────────────────────────
+{
+  const { describe: __foldDescribe } = require('node:test');
+  __foldDescribe("folded:bug-3163-codex-agents-md (consolidation epic #1969 B2 #1971)", () => {
+'use strict';
+
+/**
+ * Bug #3163: generate-claude-md should write to AGENTS.md on Codex runtime.
+ *
+ * When config.runtime === 'codex' (or GSD_RUNTIME=codex), the generate-claude-md
+ * handler must resolve the output path to AGENTS.md, not CLAUDE.md.
+ */
+
+const { describe, test, beforeEach, afterEach } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
+
+describe('bug #3163: generate-claude-md uses AGENTS.md for Codex runtime', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = createTempProject();
+    fs.writeFileSync(
+      path.join(tmpDir, '.planning', 'PROJECT.md'),
+      '# Test Project\n\nA Codex-hosted project.\n',
+      'utf-8'
+    );
+  });
+
+  afterEach(() => {
+    cleanup(tmpDir);
+  });
+
+  test('writes to AGENTS.md when config.runtime is codex and no --output given', () => {
+    const configPath = path.join(tmpDir, '.planning', 'config.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ runtime: 'codex', claude_md_path: './CLAUDE.md' }),
+      'utf-8'
+    );
+
+    const result = runGsdTools('generate-claude-md', tmpDir, { HOME: tmpDir });
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const parsed = JSON.parse(result.output);
+    const realTmpDir = fs.realpathSync(tmpDir);
+    const expectedAgentsPath = path.join(realTmpDir, 'AGENTS.md');
+
+    // The returned path must be AGENTS.md, not CLAUDE.md
+    assert.strictEqual(parsed.claude_md_path, expectedAgentsPath,
+      `Expected output path to be AGENTS.md but got: ${parsed.claude_md_path}`
+    );
+    // AGENTS.md must exist on disk
+    assert.ok(fs.existsSync(expectedAgentsPath), 'AGENTS.md must exist after generation');
+    // CLAUDE.md must NOT be created
+    assert.ok(!fs.existsSync(path.join(realTmpDir, 'CLAUDE.md')), 'CLAUDE.md must not be created for Codex runtime');
+  });
+
+  test('writes to AGENTS.md when GSD_RUNTIME=codex env var is set (env takes precedence over config)', () => {
+    const configPath = path.join(tmpDir, '.planning', 'config.json');
+    // Config says runtime: claude but env overrides to codex
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ runtime: 'claude', claude_md_path: './CLAUDE.md' }),
+      'utf-8'
+    );
+
+    const result = runGsdTools('generate-claude-md', tmpDir, { HOME: tmpDir, GSD_RUNTIME: 'codex' });
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const parsed = JSON.parse(result.output);
+    const realTmpDir = fs.realpathSync(tmpDir);
+    const expectedAgentsPath = path.join(realTmpDir, 'AGENTS.md');
+
+    assert.strictEqual(parsed.claude_md_path, expectedAgentsPath,
+      `Expected output path to be AGENTS.md but got: ${parsed.claude_md_path}`
+    );
+    assert.ok(fs.existsSync(expectedAgentsPath), 'AGENTS.md must exist after generation');
+    assert.ok(!fs.existsSync(path.join(realTmpDir, 'CLAUDE.md')), 'CLAUDE.md must not be created when GSD_RUNTIME=codex');
+  });
+
+  test('--output flag overrides runtime detection when explicitly provided', () => {
+    const configPath = path.join(tmpDir, '.planning', 'config.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ runtime: 'codex', claude_md_path: './CLAUDE.md' }),
+      'utf-8'
+    );
+
+    // When --output is explicitly provided, it must be honoured regardless of runtime
+    const result = runGsdTools(
+      ['generate-claude-md', '--output', 'EXPLICIT-OUTPUT.md'],
+      tmpDir,
+      { HOME: tmpDir }
+    );
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const parsed = JSON.parse(result.output);
+    const realTmpDir = fs.realpathSync(tmpDir);
+    assert.strictEqual(
+      parsed.claude_md_path,
+      path.join(realTmpDir, 'EXPLICIT-OUTPUT.md'),
+      `Expected explicit --output to be honoured, got: ${parsed.claude_md_path}`
+    );
+  });
+
+  test('non-codex runtime still writes to CLAUDE.md', () => {
+    const configPath = path.join(tmpDir, '.planning', 'config.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ runtime: 'claude', claude_md_path: './CLAUDE.md' }),
+      'utf-8'
+    );
+
+    const result = runGsdTools('generate-claude-md', tmpDir, { HOME: tmpDir });
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const parsed = JSON.parse(result.output);
+    const realTmpDir = fs.realpathSync(tmpDir);
+    assert.strictEqual(
+      parsed.claude_md_path,
+      path.join(realTmpDir, 'CLAUDE.md'),
+      `Expected CLAUDE.md for claude runtime, got: ${parsed.claude_md_path}`
+    );
+    assert.ok(fs.existsSync(path.join(realTmpDir, 'CLAUDE.md')), 'CLAUDE.md must exist for claude runtime');
+    assert.ok(!fs.existsSync(path.join(realTmpDir, 'AGENTS.md')), 'AGENTS.md must not be created for claude runtime');
+  });
+});
+  });
+}

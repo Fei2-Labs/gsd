@@ -1,6 +1,6 @@
 # CommandRoutingHub as single dispatch seam for CJS command families
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0174 (2026-05-23); originally Accepted (2026-05-20)
 - **Date:** 2026-05-20
 
 ## Context
@@ -9,7 +9,7 @@ Seven `*-command-router.cjs` files (`phase`, `phases`, `roadmap`, `state`, `veri
 
 ## Decision
 
-Introduce `CommandRoutingHub` (`get-shit-done/bin/lib/command-routing-hub.cjs`) as the single dispatch seam for all CJS command family routers. The hub contract:
+Introduce `CommandRoutingHub` (`gsd-core/bin/lib/command-routing-hub.cjs`) as the single dispatch seam for all CJS command family routers. The hub contract:
 
 ```
 createHub({ mode: 'sdk' | 'cjs', sdkLoader, cjsRegistry, manifest }) -> hub
@@ -48,4 +48,4 @@ Future direction (deferred): the hub should consult `manifest` to detect per-sub
 ## References
 
 - Extends ADR-0001 (Dispatch Policy Module) — the hub implements the no-throw + structured-result contract ADR-0001 established for the SDK query layer, applying it to the CJS adapter layer.
-- Issue: [#3788](https://github.com/gsd-build/get-shit-done/issues/3788)
+- Issue: [#3788](https://github.com/open-gsd/get-shit-done-redux/issues/3788)

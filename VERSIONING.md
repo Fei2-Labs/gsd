@@ -6,9 +6,9 @@ GSD follows [Semantic Versioning 2.0.0](https://semver.org/) with three release 
 
 | Tier | What ships | Version format | npm tag | Branch | Install |
 |------|-----------|---------------|---------|--------|---------|
-| **Patch** | Bug fixes only | `1.27.1` | `latest` | `hotfix/1.27.1` | `npx get-shit-done-cc@latest` |
-| **Minor** | Fixes + enhancements | `1.28.0` | `latest` (after RC) | `release/1.28.0` | `npx get-shit-done-cc@next` (RC) |
-| **Major** | Fixes + enhancements + features | `2.0.0` | `latest` (after beta) | `release/2.0.0` | `npx get-shit-done-cc@next` (beta) |
+| **Patch** | Bug fixes only | `1.27.1` | `latest` | `hotfix/1.27.1` | `npx @opengsd/gsd-core@latest` |
+| **Minor** | Fixes + enhancements | `1.28.0` | `latest` (after RC) | `release/1.28.0` | `npx @opengsd/gsd-core@next` (RC) |
+| **Major** | Fixes + enhancements + features | `2.0.0` | `latest` (after beta) | `release/2.0.0` | `npx @opengsd/gsd-core@next` (beta) |
 
 ## npm Dist-Tags
 
@@ -16,8 +16,8 @@ Only two tags, following Angular/Next.js convention:
 
 | Tag | Meaning | Installed by |
 |-----|---------|-------------|
-| `latest` | Stable production release | `npm install get-shit-done-cc` (default) |
-| `next` | Pre-release (RC or beta) | `npm install get-shit-done-cc@next` (opt-in) |
+| `latest` | Stable production release | `npm install @opengsd/gsd-core` (default) |
+| `next` | Pre-release (RC or beta) | `npm install @opengsd/gsd-core@next` (opt-in) |
 
 The version string (`-rc.1` vs `-beta.1`) communicates stability level. Users never get pre-releases unless they explicitly opt in.
 
@@ -71,34 +71,23 @@ For fixes that need to ship without waiting for the next minor.
 
 A hotfix `vX.YY.Z` cumulatively includes everything in `vX.YY.{Z-1}` plus every `fix:`/`chore:` commit landed on `main` since that base. The base tag is the anchor — `git cherry $BASE_TAG main` reveals exactly which commits are still unshipped, and the new `vX.YY.Z` tag becomes the next hotfix's base, so the cycle is self-documenting.
 
-#### Two paths
+#### How to dispatch a hotfix
 
-**Path A — `hotfix.yml` (canonical, two-step):**
+Hotfixes are dispatched via the **Release workflow (`release.yml`)** with a patch version (X.Y.Z). There is no separate hotfix workflow.
 
-1. Trigger `hotfix.yml` with `action=create`, `version=1.27.1`, `auto_cherry_pick=true` (default).
+1. Trigger `release.yml` with `action=create`, `version=1.27.1`, `auto_cherry_pick=true` (default).
    - Workflow detects `BASE_TAG` = highest `v1.27.*` < `v1.27.1` (so `1.27.1` branches from `v1.27.0`; `1.27.2` would branch from `v1.27.1`).
    - Branches `hotfix/1.27.1` from `BASE_TAG`.
    - Auto-cherry-picks every `fix:`/`chore:` commit on `origin/main` not already in the base, oldest-first. Patch-equivalents are skipped via `git cherry`. `feat:`/`refactor:` are **never** auto-included.
    - On conflict the workflow halts with the offending SHA. Resolve manually on the branch, then re-run finalize with `auto_cherry_pick=false`.
    - Bumps `package.json` (and `sdk/package.json`), pushes the branch, and lists every included SHA in the run summary.
 2. (Optional) push additional manual commits to `hotfix/1.27.1`.
-3. Trigger `hotfix.yml` with `action=finalize`. The workflow:
+3. Trigger `release.yml` with `action=finalize`. The workflow:
    - Runs `install-smoke` cross-platform gate.
    - Runs full test suite + coverage.
-   - Builds SDK, bundles `sdk-bundle/gsd-sdk.tgz` inside the CC tarball (parity with `release-sdk.yml`).
+   - Builds SDK, bundles `sdk-bundle/gsd-sdk.tgz` inside the CC tarball.
    - Tags `v1.27.1`, publishes to `@latest`, re-points `@next → v1.27.1`.
    - Opens merge-back PR against `main`.
-
-**Path B — `release-sdk.yml` (stopgap, one-shot):**
-
-Active while the `@gsd-build/sdk` npm token is unavailable; bundles the SDK inside the CC tarball.
-
-1. Trigger `release-sdk.yml` with `action=hotfix`, `version=1.27.1`, `auto_cherry_pick=true`.
-   - The `prepare` job creates the branch and cherry-picks (same logic as Path A).
-   - `install-smoke` runs against the new branch.
-   - The `release` job tags, publishes to `@latest`, re-points `@next`, opens merge-back PR.
-   - Idempotent: if `hotfix/1.27.1` already exists (e.g. you ran `hotfix.yml create` first), the prepare job checks it out and re-runs cherry-pick as a no-op.
-2. `dry_run=true` exercises the full pipeline without pushing the branch or publishing.
 
 ### Minor Release (Standard Cycle)
 
@@ -107,7 +96,7 @@ For accumulated fixes and enhancements.
 1. Trigger `release.yml` with action `create` and version (e.g., `1.28.0`)
 2. Workflow creates `release/1.28.0` branch from main, bumps package.json
 3. Trigger `release.yml` with action `rc` to publish `1.28.0-rc.1` to `next`
-4. Test the RC: `npx get-shit-done-cc@next`
+4. Test the RC: `npx @opengsd/gsd-core@next`
 5. If issues found: fix on release branch, publish `rc.2`, `rc.3`, etc.
 6. Trigger `release.yml` with action `finalize` — publishes `1.28.0` to `latest`
 7. Merge release branch to main
@@ -135,6 +124,28 @@ Branch names map to commit types:
 | `docs/` | `docs:` | none |
 | `refactor/` | `refactor:` | none |
 
+## Manifest Version Sync
+
+Certain runtime-integration manifests carry a `version` field that must always
+match `package.json`:
+
+- `.claude-plugin/plugin.json` — Claude Code plugin manifest (issue #766)
+- `gemini-extension.json` — Gemini CLI extension manifest (issue #775)
+- `.claude-plugin/marketplace.json` — Claude plugin marketplace manifest; its
+  version lives at `plugins[0].version` and is stamped via a nested versionKey
+  descriptor (issue #1855)
+
+The `version` npm lifecycle script (`scripts/sync-manifest-versions.cjs --stage`)
+stamps these files automatically on every `npm version` call, and stages them so
+they are included in the release commit alongside `package.json`.
+
+To add a new manifest that must track the package version, register its path
+(and, if its version field is not top-level, its dotted `versionKey`) in the
+`VERSIONED_MANIFESTS` array in `scripts/sync-manifest-versions.cjs`. A
+regression test (`tests/issue-844-manifest-version-sync.test.cjs`) enforces this:
+it scans all committed JSON files for a matching `version` field and fails if any
+are missing from the registry.
+
 ## Publishing Commands (Reference)
 
 ```bash
@@ -145,5 +156,5 @@ npm publish
 npm publish --tag next
 
 # Verify what latest and next point to
-npm dist-tag ls get-shit-done-cc
+npm dist-tag ls @opengsd/gsd-core
 ```

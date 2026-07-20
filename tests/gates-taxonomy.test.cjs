@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * Validates the gates taxonomy reference document (#1715).
@@ -15,13 +15,13 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const GATES_REF = path.join(ROOT, 'get-shit-done', 'references', 'gates.md');
+const GATES_REF = path.join(ROOT, 'gsd-core', 'references', 'gates.md');
 
 describe('gates taxonomy (#1715)', () => {
   test('reference file exists', () => {
     assert.ok(
       fs.existsSync(GATES_REF),
-      'get-shit-done/references/gates.md must exist'
+      'gsd-core/references/gates.md must exist'
     );
   });
 
@@ -74,7 +74,7 @@ describe('gates taxonomy (#1715)', () => {
   });
 
   test('plan-phase.md references gates.md', () => {
-    const planPhase = path.join(ROOT, 'get-shit-done', 'workflows', 'plan-phase.md');
+    const planPhase = path.join(ROOT, 'gsd-core', 'workflows', 'plan-phase.md');
     const content = fs.readFileSync(planPhase, 'utf-8');
     assert.ok(
       content.includes('references/gates.md'),
@@ -83,7 +83,7 @@ describe('gates taxonomy (#1715)', () => {
   });
 
   test('execute-phase.md references gates.md', () => {
-    const execPhase = path.join(ROOT, 'get-shit-done', 'workflows', 'execute-phase.md');
+    const execPhase = path.join(ROOT, 'gsd-core', 'workflows', 'execute-phase.md');
     const content = fs.readFileSync(execPhase, 'utf-8');
     assert.ok(
       content.includes('references/gates.md'),

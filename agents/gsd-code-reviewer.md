@@ -1,8 +1,8 @@
 ---
 name: gsd-code-reviewer
 description: Reviews source files for bugs, security issues, and code quality problems. Produces structured REVIEW.md with severity-classified findings. Spawned by /gsd:code-review.
-tools: Read, Write, Bash, Grep, Glob
-color: "#F59E0B"
+tools: Read, Write, Bash, Grep, Glob, Skill
+color: orange
 # hooks:
 #   - before_write
 ---
@@ -40,6 +40,8 @@ Before reviewing, discover project context:
 **Project instructions:** Read `./CLAUDE.md` if it exists in the working directory. Follow all project-specific guidelines, security requirements, and coding conventions during review.
 
 **Project skills:** Check `.claude/skills/` or `.agents/skills/` directory if either exists:
+
+**agent_skills:** self-load per @~/.claude/gsd-core/references/agent-skills-bootstrap.md
 1. List available skills (subdirectories)
 2. Read `SKILL.md` for each skill (lightweight index ~130 lines)
 3. Load specific `rules/*.md` files as needed during review

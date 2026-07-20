@@ -3,11 +3,13 @@ name: Tests
 on:
   push:
     branches:
+      - next
       - main
       - 'release/**'
       - 'hotfix/**'
   pull_request:
     branches:
+      - next
       - main
   workflow_dispatch:
 
@@ -15,72 +17,152 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  # Static lint: test-suite and PR-check contracts.
-  # Runs once (not per matrix node version) since it is a file-content check.
-  lint-tests:
+  changes:
+    name: Detect test scope
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    outputs:
+      code_changed: ${{ steps.scope.outputs.code_changed }}
+      full_matrix: ${{ steps.scope.outputs.full_matrix }}
+      product_changed: ${{ steps.scope.outputs.product_changed }}
+      targeted_tests: ${{ steps.scope.outputs.targeted_tests }}
+      windows_tests: ${{ steps.scope.outputs.windows_tests }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ github.token }}
+
+      - name: Classify changed paths
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            {
+              echo "code_changed=true"
+              echo "product_changed=true"
+              echo "full_matrix=true"
+              echo "targeted_tests="
+              echo "windows_tests="
+            } >> "$GITHUB_OUTPUT"
+            {
+              echo "## Test scope"
+              echo ""
+              echo "- event: \`$EVENT_NAME\`"
+              echo "- code_changed: \`true\`"
+              echo "- full_matrix: \`true\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          node scripts/ci-test-scope.cjs --base "$BASE_SHA" --head "$HEAD_SHA" | tee ci-test-scope.json
+          node <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require('fs');
+          const result = JSON.parse(fs.readFileSync('ci-test-scope.json', 'utf8'));
+          console.log('## Test scope');
+          console.log('');
+          console.log(`- code_changed: \`${result.code_changed}\``);
+          console.log(`- full_matrix: \`${result.full_matrix}\``);
+          console.log(`- targeted_tests: \`${result.targeted_tests.length}\``);
+          console.log(`- windows_tests: \`${result.windows_tests.length}\``);
+          if (result.reasons.length > 0) {
+            console.log('');
+            console.log('### Reasons');
+            for (const reason of result.reasons) console.log(`- ${reason}`);
+          }
+          NODE
+
+  # Static lint: test-suite and PR-check contracts.
+  # Runs once, not per matrix lane.
+  lint-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: true
+          token: ${{ github.token }}
       - name: Set up Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
           node-version: 24
-      - name: Lint — no source-grep tests
-        shell: bash
-        run: node scripts/lint-no-source-grep.cjs
-      - name: Lint — test file count per module
-        shell: bash
-        run: node scripts/lint-test-file-count.cjs
-      - name: Lint — command contract (ADR-0002)
-        shell: bash
-        run: node scripts/lint-command-contract.cjs
-      - name: Lint — PR checks use projectDir
-        shell: bash
-        run: node scripts/lint-pr-check-project-dir.cjs
+      - name: Install dev dependencies
+        run: npm ci --ignore-scripts
+      # ADR-457 build-at-publish: bin/lib/*.cjs are gitignored, built by tsc.
+      # --ignore-scripts skips the prepare build, but lint:skill-deps (and other
+      # lint scripts) require() the built modules — so build them explicitly.
+      - name: Build runtime lib (required by lint scripts)
+        run: npm run build:lib
+      # Single orchestrated lint entry point (npm run lint:ci) so local and CI
+      # always run the identical set. It composes `npm run lint`, keeping one
+      # eslint invocation home; the --cache flag inside it is a no-op in CI
+      # (node_modules/.cache is never restored) but still speeds local runs.
+      # Each sub-lint prints its own banner, so a failure identifies itself.
+      - name: Lint — all (ESLint, skill deps, test-file count, command contract, PR checks, legacy name, regression-test names, resolution-provenance)
+        run: npm run lint:ci
 
   test:
+    name: test (${{ matrix.os }}, ${{ matrix.node-version }})
+    needs: changes
+    if: needs.changes.outputs.product_changed == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    env:
+      GSD_PLUGIN_ROOT: .ci-gsd-plugin-root-disabled
     strategy:
-      # fail-fast disabled so a single lane failure doesn't cancel the rest;
-      # makes OS-specific vs version-specific regressions easier to distinguish.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        node-version: [22, 24]
-        # Windows path/separator coverage is also reinforced by hardcoded-paths.test.cjs
-        # and windows-robustness.test.cjs (static analysis).
-        # A dedicated windows-compat workflow runs on a weekly schedule.
+        include:
+          # Required default PR lanes: fast signal, minimum runtime, primary runtime,
+          # and one Windows shell/path lane. The non-primary OS/runtime lanes run
+          # scoped tests from scripts/ci-test-scope.cjs; Ubuntu/Node 24 runs the
+          # broader default suite.
+          - os: ubuntu-latest
+            node-version: 22
+            scope: targeted
+          - os: ubuntu-latest
+            node-version: 24
+            scope: full
+          - os: windows-latest
+            node-version: 24
+            scope: windows
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      # Windows lane on checkout v5.0.1 (drops includeIf; no auth flake, uses Node 24 natively).
+      # v6 uses includeIf.gitdir: for auth injection; on Windows git 2.54 the path comparison is
+      # unreliable (https://github.com/actions/checkout/pull/2425). v5 never used includeIf.
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1 (Windows)
+        if: runner.os == 'Windows'
         with:
-          # Fetch full history so we can merge origin/main for stale-base detection.
           fetch-depth: 0
+          persist-credentials: true
+          token: ${{ github.token }}
 
-      # GitHub's `refs/pull/N/merge` is cached against the recorded merge-base.
-      # When main advances after a PR is opened, the cache stays stale and CI
-      # runs against the pre-advance state — hiding bugs that are already fixed
-      # on trunk and surfacing type errors that were introduced and then patched
-      # on main in between. Explicitly merge current origin/main here so tests
-      # always run against the latest trunk.
-      - name: Rebase check — merge origin/main into PR head
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2 (Linux/macOS)
+        if: runner.os != 'Windows'
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ github.token }}
+
+      - name: Guard — require GitHub-hosted runner
+        run: node scripts/ci-guard-runner.cjs
+
+      - name: Rebase check — merge PR base branch into PR head
         if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.email "ci@gsd-build"
-          git config user.name "CI Rebase Check"
-          git fetch origin main
-          if ! git merge --no-edit --no-ff origin/main; then
-            echo "::error::This PR cannot cleanly merge origin/main. Rebase your branch onto current main and push again."
-            echo "::error::Conflicting files:"
-            git diff --name-only --diff-filter=U
-            git merge --abort
-            exit 1
-          fi
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci-rebase-check.cjs
 
       - name: Set up Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
@@ -88,156 +170,304 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
+      - name: Environment check
+        run: npm run check:env
+
       - name: Install dependencies
-        shell: bash
         run: npm ci
 
-      - name: Build SDK dist (required by installer)
-        shell: bash
-        run: npm run build:sdk
+      - name: Dependency integrity gate
+        run: node scripts/check-npm-integrity.cjs
 
-      # Seam contract gate: keep manifest -> generated aliases -> registry/CJS adapters aligned.
-      # Run once per workflow on the primary Linux node to avoid redundant matrix cost.
-      - name: SDK seam coverage tests
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: cd sdk && npx vitest run src/query/command-seam-coverage.test.ts
+      - name: Prepare scoped test list
+        if: matrix.scope != 'full'
+        env:
+          TEST_SCOPE: ${{ matrix.scope }}
+          TARGETED_TESTS: ${{ needs.changes.outputs.targeted_tests }}
+          WINDOWS_TESTS: ${{ needs.changes.outputs.windows_tests }}
+        run: node scripts/ci-prepare-test-scope.cjs
 
-      - name: SDK generated alias artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-command-aliases-fresh.mjs
+      - name: Run scoped tests
+        if: matrix.scope != 'full'
+        run: node scripts/run-tests.cjs --files-from .ci-selected-tests.txt
 
-      - name: SDK generated state-document artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-state-document-fresh.mjs
+      # The unit suite runs ONCE here, under c8 with the coverage gate — the
+      # former standalone `coverage` job duplicated this lane's entire unit
+      # run (~4 min of runner time per PR) just to collect the same numbers.
+      - name: Run unit tests (coverage gate ≥70% on gsd-core/bin/lib)
+        if: matrix.scope == 'full'
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: npm run test:coverage:unit
 
-      - name: SDK generated configuration artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-configuration-fresh.mjs
+      # Second-tier floor over the CI/release/lint tooling itself. Re-slices
+      # the SAME V8 coverage data left in coverage/tmp by the run above — no
+      # extra suite execution. Audit 2026-06: scripts/ measured 65.95%; the
+      # 55% floor prevents a collapse to zero-coverage tooling while leaving
+      # headroom for variance. The threshold lives in package.json next to
+      # the 70% lib gate — raise deliberately, never lower.
+      - name: Coverage floor — scripts/ tooling (≥55%)
+        if: matrix.scope == 'full'
+        run: npm run test:coverage:scripts-floor
 
-      - name: SDK generated workstream-inventory-builder artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-workstream-inventory-builder-fresh.mjs
-
-      - name: SDK generated project-root artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-project-root-fresh.mjs
-
-      - name: SDK generated plan-scan artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-plan-scan-fresh.mjs
-
-      - name: SDK generated secrets artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-secrets-fresh.mjs
-
-      - name: SDK generated schema-detect artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-schema-detect-fresh.mjs
-
-      - name: SDK generated decisions artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-decisions-fresh.mjs
-
-      - name: SDK generated workstream-name-policy artifact drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node sdk/scripts/check-workstream-name-policy-fresh.mjs
-
-      - name: Shared Module hand-sync drift check
-        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
-        shell: bash
-        run: node scripts/lint-shared-module-handsync.cjs
-
-      # Split lanes (issue #3597). Unit is the fast default lane; integration
-      # and security run alongside it on every PR. `install` and `slow` are
-      # skipped on PR CI by design — they run on the weekly windows-compat
-      # workflow and on `main` push only. See docs/TESTING-SUITES.md.
-      - name: Run unit tests
-        shell: bash
-        run: npm run test:unit
+      - name: Upload coverage artifact
+        if: always() && matrix.scope == 'full'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: coverage-unit
+          # coverage/tmp holds raw per-process V8 dumps (>1 GB for the full
+          # unit suite) — exclude it; the rendered reports are the artifact.
+          path: |
+            coverage/
+            !coverage/tmp
+            .nyc_output/
+          if-no-files-found: ignore
 
       - name: Run integration tests
-        shell: bash
+        if: matrix.scope == 'full'
         run: npm run test:integration
 
       - name: Run security tests
-        shell: bash
+        if: matrix.scope == 'full'
         run: npm run test:security
 
-      # Install + slow lanes only on main-branch push (not PR CI) so PRs stay fast.
-      # Windows is excluded from the install lane: `npm install -g <tarball>` runs
-      # 7× per release-tarball-smoke.install.test.cjs invocation (1× before-hook
-      # + 6× per-test) and each takes 60–90 s on windows-latest (NTFS + Defender),
-      # so the lane alone consumes ~10 min and blows the 15-min job budget after
-      # earlier steps. Linux + macOS coverage stays here; Windows tarball install
-      # coverage is provided by the weekly windows-compat workflow.
       - name: Run install tests
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.os != 'windows-latest'
-        shell: bash
+        if: matrix.scope == 'full' && needs.changes.outputs.full_matrix == 'true'
         run: npm run test:install
 
       - name: Run slow tests
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.os != 'windows-latest'
-        shell: bash
+        if: matrix.scope == 'full' && needs.changes.outputs.full_matrix == 'true'
         run: npm run test:slow
 
-
-  # Dedicated coverage job. Runs only on ubuntu/Node 24 (the canonical lane)
-  # because c8 coverage of one suite on one OS is enough signal — running it
-  # across the full matrix would 9x the cost for no extra coverage data.
-  # Replaces main's per-matrix `Run tests with coverage` step.
-  coverage:
+  test-inert:
+    name: test (inert CI)
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true' && needs.changes.outputs.product_changed != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GSD_PLUGIN_ROOT: .ci-gsd-plugin-root-disabled
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
-      - name: Rebase check — merge origin/main into PR head
+          persist-credentials: true
+          token: ${{ github.token }}
+      - name: Guard — require GitHub-hosted runner
+        run: node scripts/ci-guard-runner.cjs
+      - name: Rebase check — merge PR base branch into PR head
         if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.email "ci@gsd-build"
-          git config user.name "CI Rebase Check"
-          git fetch origin main
-          if ! git merge --no-edit --no-ff origin/main; then
-            echo "::error::This PR cannot cleanly merge origin/main. Rebase your branch onto current main and push again."
-            git merge --abort
-            exit 1
-          fi
-      - name: Set up Node.js 24
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci-rebase-check.cjs
+      - name: Set up Node.js 22
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
-          node-version: 24
+          node-version: 22
           cache: 'npm'
+      - name: Environment check
+        run: npm run check:env
       - name: Install dependencies
-        shell: bash
         run: npm ci
-      - name: Build SDK dist
-        shell: bash
-        run: npm run build:sdk
-      - name: Unit coverage
-        shell: bash
+      - name: Dependency integrity gate
+        run: node scripts/check-npm-integrity.cjs
+      - name: Prepare scoped test list
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
-        run: npm run test:coverage:unit
-      - name: Upload coverage artifact
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+          TEST_SCOPE: targeted
+          TARGETED_TESTS: ${{ needs.changes.outputs.targeted_tests }}
+          WINDOWS_TESTS: ${{ needs.changes.outputs.windows_tests }}
+        run: node scripts/ci-prepare-test-scope.cjs
+      - name: Run scoped tests
+        run: node scripts/run-tests.cjs --files-from .ci-selected-tests.txt
+
+  test-full:
+    name: full test (${{ matrix.os }}, ${{ matrix.node-version }}, shard ${{ matrix.shard }}/3)
+    needs: changes
+    if: needs.changes.outputs.code_changed == 'true' && needs.changes.outputs.full_matrix == 'true'
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    # The unit suite is sharded across 3 parallel runners per OS/node leg
+    # (#1212). Each shard runs a deterministic round-robin third of the sorted
+    # unit-file list via `run-tests.cjs --suite unit --shard i/3`, so per-job
+    # wall-clock scales as O(total/3) and stays well under the cap as the suite
+    # grows — replacing the #869 timeout bump (15→20m) which only deferred the
+    # cliff. The cap stays at 20m as a generous backstop; a healthy shard now
+    # finishes in roughly a third of the old single-lane wall-clock.
+    #
+    # The matrix is the cross-product of 3 OS/node legs × 3 shards = 9 jobs,
+    # enumerated explicitly as `include:` rows. (A base `shard: [1,2,3]`
+    # dimension would NOT cross-product against `include` legs — include rows
+    # sharing no key with the base matrix are appended as standalone combos —
+    # and a NESTED `leg.os` key is not resolvable by the H1 shell-policy linter
+    # in scripts/workflow-policy.cjs, which reads `matrix.os`/`matrix.shell`
+    # directly. Explicit rows keep both the cross-product and the linter happy.)
+    timeout-minutes: 20
+    env:
+      GSD_PLUGIN_ROOT: .ci-gsd-plugin-root-disabled
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            node-version: 22
+            shell: pwsh
+            shard: 1
+          - os: windows-latest
+            node-version: 22
+            shell: pwsh
+            shard: 2
+          - os: windows-latest
+            node-version: 22
+            shell: pwsh
+            shard: 3
+          - os: macos-latest
+            node-version: 22
+            shell: 'zsh {0}'
+            shard: 1
+          - os: macos-latest
+            node-version: 22
+            shell: 'zsh {0}'
+            shard: 2
+          - os: macos-latest
+            node-version: 22
+            shell: 'zsh {0}'
+            shard: 3
+          - os: macos-latest
+            node-version: 24
+            shell: 'zsh {0}'
+            shard: 1
+          - os: macos-latest
+            node-version: 24
+            shell: 'zsh {0}'
+            shard: 2
+          - os: macos-latest
+            node-version: 24
+            shell: 'zsh {0}'
+            shard: 3
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1 (Windows)
+        if: runner.os == 'Windows'
         with:
-          name: coverage-unit
-          path: |
-            coverage/
-            .nyc_output/
-          if-no-files-found: ignore
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ github.token }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2 (Linux/macOS)
+        if: runner.os != 'Windows'
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ github.token }}
+
+      - name: Guard — require GitHub-hosted runner
+        run: node scripts/ci-guard-runner.cjs
+
+      - name: Rebase check — merge PR base branch into PR head
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/ci-rebase-check.cjs
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Environment check
+        run: npm run check:env
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dependency integrity gate
+        run: node scripts/check-npm-integrity.cjs
+
+      # The heavy unit suite is split across the 3 shards — each runs a
+      # deterministic round-robin third of the sorted unit-file list. The
+      # union of shards 1/3 + 2/3 + 3/3 is the full unit suite, so coverage is
+      # unchanged; only wall-clock per job drops to ~total/3.
+      - name: Run unit tests (shard ${{ matrix.shard }}/3)
+        run: node scripts/run-tests.cjs --suite unit --shard ${{ matrix.shard }}/3
+
+      # Integration and security suites are small; run them once per OS/node
+      # leg (on shard 1 only) instead of redundantly on all three shards. They
+      # still run on every leg (3 times total, once per platform), so each
+      # platform's integration/security coverage is unchanged — only the
+      # 3x-per-leg duplication is removed.
+      - name: Run integration tests
+        if: matrix.shard == 1
+        run: npm run test:integration
+
+      - name: Run security tests
+        if: matrix.shard == 1
+        run: npm run test:security
+
+  required-tests:
+    name: Required tests
+    needs:
+      - changes
+      - lint-tests
+      - test
+      - test-inert
+      - test-full
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Summarize required test gate
+        env:
+          CODE_CHANGED: ${{ needs.changes.outputs.code_changed }}
+          PRODUCT_CHANGED: ${{ needs.changes.outputs.product_changed }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          LINT_RESULT: ${{ needs.lint-tests.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          INERT_RESULT: ${{ needs.test-inert.result }}
+          FULL_TEST_RESULT: ${{ needs.test-full.result }}
+        run: |
+          set -euo pipefail
+          echo "code_changed=$CODE_CHANGED"
+          echo "product_changed=$PRODUCT_CHANGED"
+          echo "changes=$CHANGES_RESULT"
+          echo "lint-tests=$LINT_RESULT"
+          echo "test=$TEST_RESULT"
+          echo "test-inert=$INERT_RESULT"
+          echo "test-full=$FULL_TEST_RESULT"
+
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "::error::test scope detection did not pass"
+            exit 1
+          fi
+
+          if [ "$LINT_RESULT" != "success" ]; then
+            echo "::error::lint-tests did not pass"
+            exit 1
+          fi
+
+          if [ "$CODE_CHANGED" != "true" ]; then
+            echo "No code paths changed; matrix tests intentionally skipped."
+            exit 0
+          fi
+
+          if [ "$PRODUCT_CHANGED" = "true" ]; then
+            if [ "$TEST_RESULT" != "success" ]; then
+              echo "::error::test matrix did not pass"
+              exit 1
+            fi
+            # The coverage gates (lib 70% + scripts/ 55% floor) run inside the
+            # ubuntu/24 full lane of the `test` matrix, so TEST_RESULT covers them.
+            if [ "$FULL_TEST_RESULT" != "success" ] && [ "$FULL_TEST_RESULT" != "skipped" ]; then
+              echo "::error::full parity matrix did not pass"
+              exit 1
+            fi
+          else
+            if [ "$INERT_RESULT" != "success" ]; then
+              echo "::error::inert CI lane did not pass"
+              exit 1
+            fi
+          fi
+
+          echo "Required test gate passed."

@@ -1,6 +1,7 @@
 ---
 name: gsd:stats
 description: Display project statistics — phases, plans, requirements, git metrics, and timeline
+effort: low
 allowed-tools:
   - Read
   - Bash
@@ -11,7 +12,7 @@ Display comprehensive project statistics including phase progress, plan executio
 </objective>
 
 <execution_context>
-@~/.claude/get-shit-done/workflows/stats.md
+@~/.claude/gsd-core/workflows/stats.md
 </execution_context>
 
 <process>

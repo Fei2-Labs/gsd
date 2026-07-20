@@ -1,21 +1,82 @@
 # GSD 사용자 가이드
 
-워크플로우, 문제 해결, 설정에 대한 상세 레퍼런스입니다. 빠른 시작 설정은 [README](../README.md)를 참고하세요.
+GSD Core의 설명형 동반 가이드 — 여기서 방향을 잡은 후 전용 문서로 이동하세요.
+
+> **GSD Core의 문서는 [Diataxis](https://diataxis.fr) 방식으로 구성되어 있습니다.**
+> 목적별 탐색: [튜토리얼](README.md#tutorials) · [사용 방법 가이드](README.md#how-to-guides) · [레퍼런스](README.md#reference) · [설명](README.md#explanation) · [문서 인덱스](README.md)
 
 ---
 
 ## 목차
 
+- [슬래시 명령어 형식](#슬래시-명령어-형식-하이픈-vs-콜론)
+- [네임스페이스 라우팅 입문](#네임스페이스-라우팅-입문-gsdnamespace-v140)
+- [프로젝트 생명주기 개요](#프로젝트-생명주기-개요)
 - [워크플로우 다이어그램](#워크플로우-다이어그램)
 - [UI 설계 계약](#ui-설계-계약)
-- [백로그 및 스레드](#백로그-및-스레드)
-- [워크스트림](#워크스트림)
+- [스파이킹 및 스케칭](#스파이킹--스케칭)
+- [백로그 및 스레드](#백로그--스레드)
+- [워크스트림 및 워크스페이스](#워크스트림--워크스페이스)
 - [보안](#보안)
-- [명령어 레퍼런스](#명령어-레퍼런스)
-- [설정 레퍼런스](#설정-레퍼런스)
 - [사용 예시](#사용-예시)
 - [문제 해결](#문제-해결)
-- [복구 빠른 레퍼런스](#복구-빠른-레퍼런스)
+- [복구 빠른 참조](#복구-빠른-참조)
+- [프로젝트 파일 구조](#프로젝트-파일-구조)
+- [관련 문서](#관련-문서)
+
+GitHub / Linear / Jira 이슈에서 GSD를 직접 구동하는 방법은
+[이슈 기반 오케스트레이션](issue-driven-orchestration.md) 가이드를 참조하세요 —
+트래커 이슈를 workspace → discuss → plan → execute → verify → review → ship
+루프에 매핑하는 레시피이며, 기존 GSD 프리미티브를 활용합니다.
+
+---
+
+## 슬래시 명령어 형식 (하이픈 vs 콜론)
+
+GSD는 지원되는 모든 런타임에 **동일한 스킬 세트**를 제공하지만, 두 가지 슬래시 형식이 존재합니다:
+
+- **하이픈 형식** — `/gsd-command-name` — Claude Code, Copilot, OpenCode, Kilo, Cursor, Windsurf, Augment, Antigravity, Trae에서 사용됩니다.
+- **콜론 형식** — `/gsd:command-name` — **Gemini CLI 전용**입니다. Gemini는 모든 플러그인 명령어를 플러그인 ID 아래에 네임스페이스로 묶으므로, `--gemini` 설치 시 설치 경로가 본문 텍스트 참조와 명령어 파일을 모두 콜론 형식으로 재작성합니다.
+
+직접 선택할 필요는 없습니다 — 설치 프로그램이 각 런타임의 명령어 디렉터리에 올바른 형식을 작성합니다. Gemini 터미널에서 안내를 따를 때는 각 슬래시 명령어를 읽을 때 `gsd` 뒤의 하이픈을 콜론으로 대체하세요.
+
+## 네임스페이스 라우팅 입문 (`gsd:<namespace>`, v1.40)
+
+v1.40은 계층적 라우팅의 1단계 진입점으로 여섯 개의 **네임스페이스 메타스킬**을 제공합니다 — 이 스킬들은 열심히 스킬 목록을 나열하는 토큰 비용을 낮게 유지합니다(6개 라우터에 ~120 토큰 vs 86개 스킬 평면 목록에 ~2,150 토큰). 모든 구체적인 서브스킬은 여전히 직접 호출할 수 있습니다. 각 네임스페이스 라우터의 본문에는 사용자의 의도를 올바른 구체적 서브스킬로 매핑하는 라우팅 테이블이 포함되어 있습니다.
+
+| 네임스페이스 | 라우터 | 라우팅 대상 |
+|-----------|--------|-----------|
+| 단계 파이프라인 | `/gsd-workflow` | discuss / plan / execute / verify / phase / progress |
+| 프로젝트 생명주기 | `/gsd-project` | milestones, audits, summary |
+| 품질 게이트 | `/gsd-quality` | code review, debug, audit, security, eval, ui |
+| 코드베이스 인텔리전스 | `/gsd-context` | map, graphify, docs, learnings |
+| 관리 | `/gsd-manage` | config, workspace, workstreams, thread, update, ship, inbox |
+| 탐색 및 캡처 | `/gsd-ideate` | explore, sketch, spike, spec, capture |
+
+네임스페이스 라우터를 직접 입력할 필요는 거의 없습니다. 이들의 가치는 모델이 올바른 서브스킬을 찾는 데 사용하는 라우팅 레이어에 있습니다 — 시스템 프롬프트가 86개 대신 6개 항목을 나열할 수 있도록 존재합니다. 구체적인 명령어를 이미 알고 있다면(예: `/gsd-plan-phase`) 직접 호출하세요.
+
+---
+
+## 프로젝트 생명주기 개요
+
+GSD 핵심 루프는 **discuss → plan → execute → verify → ship**이며, 단계별로 반복됩니다. 전체 단계별 안내 — 출력 예시, 생성되는 파일, 사용 가능한 모든 플래그 포함 — 는 전용 튜토리얼에 있습니다.
+
+[첫 번째 프로젝트](tutorials/your-first-project.md)를 참조하세요.
+
+새 마일스톤 시작 전 기존 코드베이스를 온보딩하는 방법은 [기존 코드베이스 온보딩](tutorials/onboarding-an-existing-codebase.md)을 참조하세요.
+
+**한눈에 보는 관련 플래그:**
+
+| 플래그 | 명령어 | 사용 시점 |
+| ---- | ------- | ----------- |
+| `--auto` | `/gsd-new-project` | 대화형 질문을 건너뛰고 PRD 파일에서 가져오기 |
+| `--research` | `/gsd-quick` | 임시 작업에 리서치 에이전트 추가 |
+| `--validate` | `/gsd-quick` | 계획 검사 및 실행 후 검증 추가 |
+| `--chain` | `/gsd-discuss-phase` | 중단 없이 discuss → plan → execute 자동 연결 |
+| `--skip-research` | `/gsd-plan-phase` | 도메인이 이미 익숙할 때 리서치 에이전트 건너뛰기 |
+| `--draft` | `/gsd-ship` | 검토 준비 대신 초안 PR 생성 |
+
+모든 플래그가 포함된 전체 명령어 레퍼런스는 [`docs/COMMANDS.md`](COMMANDS.md)를 참조하세요. 구성 옵션(모델 프로필, 워크플로우 에이전트, git 브랜치)은 [`docs/CONFIGURATION.md`](CONFIGURATION.md)를 참조하세요.
 
 ---
 
@@ -23,7 +84,7 @@
 
 ### 전체 프로젝트 생명주기
 
-```
+```text
   ┌──────────────────────────────────────────────────┐
   │                   NEW PROJECT                    │
   │  /gsd-new-project                                │
@@ -77,7 +138,7 @@
 
 ### 계획 에이전트 조정
 
-```
+```text
   /gsd-plan-phase N
          │
          ├── Phase Researcher (x4 parallel)
@@ -109,23 +170,19 @@
          └── Done
 ```
 
-### 검증 아키텍처 (Nyquist 레이어)
+### 검증 아키텍처 (나이퀴스트 레이어)
 
-plan-phase 조사 단계에서 GSD는 코드 작성 전에 각 페이즈 요구사항에 대한 자동화된 테스트 커버리지를 매핑합니다. 이를 통해 Claude의 실행자가 작업을 커밋할 때 몇 초 안에 검증할 수 있는 피드백 메커니즘이 이미 갖춰져 있습니다.
+계획 단계 리서치 시, GSD는 코드 작성 전에 자동화된 테스트 커버리지를 각 단계 요구사항에 매핑합니다. 리서처는 기존 테스트 인프라를 감지하고, 각 요구사항을 특정 테스트 명령어에 매핑하며, 구현 시작 전에 생성해야 할 테스트 스캐폴딩(Wave 0 작업)을 식별합니다. 계획 검사기는 이를 8번째 검증 차원으로 적용합니다: 작업에 자동화된 검증 명령어가 없는 계획은 승인되지 않습니다.
 
-조사자는 기존 테스트 인프라를 감지하고 각 요구사항을 특정 테스트 명령어에 매핑하며 구현 시작 전에 생성해야 할 테스트 스캐폴딩을 식별합니다 (Wave 0 작업).
+**출력:** `{phase}-VALIDATION.md` — 단계의 피드백 계약.
 
-계획 검사기는 이를 8번째 검증 차원으로 적용합니다. 작업에 자동화된 검증 명령어가 없는 계획은 승인되지 않습니다.
-
-**출력:** `{phase}-VALIDATION.md` — 해당 페이즈의 피드백 계약.
-
-**비활성화:** 테스트 인프라가 중요하지 않은 빠른 프로토타이핑 페이즈에서는 `/gsd-settings`에서 `workflow.nyquist_validation: false`로 설정하세요.
+**비활성화:** 테스트 인프라가 초점이 아닌 빠른 프로토타이핑 단계에서는 `/gsd-settings`에서 `workflow.nyquist_validation: false`로 설정하세요.
 
 ### 소급 검증 (`/gsd-validate-phase`)
 
-Nyquist 검증 도입 전에 실행된 페이즈나 전통적인 테스트 스위트만 있는 기존 코드베이스의 경우 커버리지 갭을 소급하여 감사하고 보완할 수 있습니다.
+나이퀴스트 검증이 생기기 전에 실행된 단계, 또는 전통적인 테스트 슈트만 있는 기존 코드베이스에 대해 소급 감사 및 커버리지 간격을 채우세요:
 
-```
+```text
   /gsd-validate-phase N
          |
          +-- Detect state (VALIDATION.md exists? SUMMARY.md exists?)
@@ -144,203 +201,31 @@ Nyquist 검증 도입 전에 실행된 페이즈나 전통적인 테스트 스�
                +-- PARTIAL -> some gaps escalated to manual-only
 ```
 
-감사자는 구현 코드를 수정하지 않으며 테스트 파일과 VALIDATION.md만 수정합니다. 테스트에서 구현 버그가 발견되면 사용자가 처리할 수 있도록 에스컬레이션으로 표시됩니다.
+감사자는 구현 코드를 수정하지 않으며, 테스트 파일과 VALIDATION.md만 수정합니다. 테스트에서 구현 버그가 발견되면, 처리할 에스컬레이션으로 표시됩니다.
 
-**사용 시점:** Nyquist가 활성화되기 전에 계획된 페이즈를 실행한 후 또는 `/gsd-audit-milestone`에서 Nyquist 준수 갭이 발견된 후에 사용합니다.
+### 가정 논의 모드
 
-### 가정 토론 모드
+기본적으로 `/gsd-discuss-phase`는 구현 선호도에 대한 개방형 질문을 합니다. 가정 모드는 이를 반전합니다: GSD가 먼저 코드베이스를 읽고, 단계 구축 방법에 대한 구조화된 가정을 표시하며, 수정 사항만 요청합니다.
 
-기본적으로 `/gsd-discuss-phase`는 구현 선호도에 대한 개방형 질문을 합니다. 가정 모드는 이를 역전시킵니다. GSD가 먼저 코드베이스를 읽고 페이즈를 어떻게 구축할지에 대한 구조화된 가정을 제시한 후 수정사항만 요청합니다.
+**활성화:** `/gsd-settings`를 통해 `workflow.discuss_mode`를 `'assumptions'`으로 설정하세요.
 
-**활성화:** `/gsd-settings`에서 `workflow.discuss_mode`를 `'assumptions'`로 설정합니다.
+전체 discuss 모드 레퍼런스는 [docs/workflow-discuss-mode.md](workflow-discuss-mode.md)를 참조하세요.
 
-**작동 방식.**
-1. PROJECT.md, 코드베이스 매핑, 기존 관례를 읽습니다.
-2. 구조화된 가정 목록을 생성합니다 (기술 선택, 패턴, 파일 위치).
-3. 가정을 확인, 수정 또는 확장하도록 제시합니다.
-4. 확인된 가정으로 CONTEXT.md를 작성합니다.
+### 결정 커버리지 게이트
 
-**사용 시점.**
-- 코드베이스를 잘 아는 숙련된 개발자
-- 개방형 질문이 속도를 저해하는 빠른 반복 개발
-- 패턴이 잘 확립되고 예측 가능한 프로젝트
+discuss 단계는 `<decisions>` 블록 아래 CONTEXT.md에 구현 결정을 번호 매긴 글머리로 캡처합니다(`- **D-01:** …`). 두 개의 게이트는 해당 결정이 계획과 배포된 코드에 반영되도록 보장합니다.
 
-전체 discuss-mode 레퍼런스는 [docs/workflow-discuss-mode.md](workflow-discuss-mode.md)를 참고하세요.
+**계획 단계 번역 게이트 (차단).** 계획 후, GSD는 추적 가능한 모든 결정이 최소한 하나의 계획의 `must_haves`, `truths`, 또는 본문에 나타날 때까지 단계를 계획된 것으로 표시하기를 거부합니다.
 
----
+**검증 단계 유효성 검사 게이트 (비차단).** 검증 중에 GSD는 추적 가능한 각 결정에 대해 계획, SUMMARY.md, 수정된 파일, 최근 커밋 메시지를 검색합니다. 누락된 항목은 경고 섹션으로 VERIFICATION.md에 기록되며, 검증 상태는 변경되지 않습니다.
 
-## UI 설계 계약
+**결정 제외.** `<decisions>` 내부의 `### Claude's Discretion` 제목 아래로 이동하거나 태그를 지정하세요: `- **D-08 [informational]:** …`, `- **D-09 [folded]:** …`, `- **D-10 [deferred]:** …`.
 
-### 배경
-
-AI 생성 프론트엔드가 시각적으로 일관성이 없는 이유는 Claude Code의 UI 능력이 부족해서가 아닙니다. 실행 전에 설계 계약이 존재하지 않았기 때문입니다. 공유 간격 척도, 색상 계약, 또는 카피라이팅 기준 없이 구축된 다섯 개의 컴포넌트는 다섯 가지 약간씩 다른 시각적 결정을 만들어냅니다.
-
-`/gsd-ui-phase`는 계획 전에 설계 계약을 확정합니다. `/gsd-ui-review`는 실행 후 결과를 감사합니다.
-
-### 명령어
-
-| 명령어 | 설명 |
-|--------|------|
-| `/gsd-ui-phase [N]` | 프론트엔드 페이즈를 위한 UI-SPEC.md 설계 계약 생성 |
-| `/gsd-ui-review [N]` | 구현된 UI의 6개 기둥 기반 시각적 감사 소급 수행 |
-
-### 워크플로우: `/gsd-ui-phase`
-
-**실행 시점:** `/gsd-discuss-phase` 이후, `/gsd-plan-phase` 이전 — 프론트엔드/UI 작업이 포함된 페이즈.
-
-**흐름.**
-1. CONTEXT.md, RESEARCH.md, REQUIREMENTS.md에서 기존 결정사항을 읽습니다.
-2. 디자인 시스템 상태를 감지합니다 (shadcn components.json, Tailwind 설정, 기존 토큰).
-3. shadcn 초기화 게이트 — React/Next.js/Vite 프로젝트에 없으면 초기화를 제안합니다.
-4. 아직 답변되지 않은 설계 계약 질문만 묻습니다 (간격, 타이포그래피, 색상, 카피라이팅, 레지스트리 안전).
-5. 페이즈 디렉터리에 `{phase}-UI-SPEC.md`를 작성합니다.
-6. 6개 차원에 대해 검증합니다 (카피라이팅, 시각, 색상, 타이포그래피, 간격, 레지스트리 안전).
-7. BLOCKED인 경우 수정 루프 (최대 2회 반복).
-
-**출력:** `.planning/phases/{phase-dir}/`의 `{padded_phase}-UI-SPEC.md`
-
-### 워크플로우: `/gsd-ui-review`
-
-**실행 시점:** `/gsd-execute-phase` 또는 `/gsd-verify-work` 이후 — 프론트엔드 코드가 있는 모든 프로젝트.
-
-**독립 실행:** 모든 프로젝트에서 작동하며 GSD 관리 프로젝트가 아니어도 됩니다. UI-SPEC.md가 없으면 추상적인 6개 기둥 기준으로 감사합니다.
-
-**6개 기둥 (각 1-4점 평가).**
-1. 카피라이팅 — CTA 레이블, 빈 상태, 오류 상태
-2. 시각 — 초점, 시각적 계층, 아이콘 접근성
-3. 색상 — 강조 사용 규율, 60/30/10 준수
-4. 타이포그래피 — 폰트 크기/굵기 제약 준수
-5. 간격 — 그리드 정렬, 토큰 일관성
-6. 경험 디자인 — 로딩/오류/빈 상태 커버리지
-
-**출력:** 점수와 상위 3개 우선 수정사항이 포함된 페이즈 디렉터리의 `{padded_phase}-UI-REVIEW.md`
-
-### 설정
-
-| 설정 | 기본값 | 설명 |
-|------|--------|------|
-| `workflow.ui_phase` | `true` | 프론트엔드 페이즈를 위한 UI 설계 계약 생성 |
-| `workflow.ui_safety_gate` | `true` | plan-phase가 프론트엔드 페이즈에서 /gsd-ui-phase 실행을 유도합니다 |
-
-두 설정 모두 부재 시 활성화 패턴을 따릅니다. `/gsd-settings`에서 비활성화할 수 있습니다.
-
-### shadcn 초기화
-
-React/Next.js/Vite 프로젝트에서 `components.json`이 없으면 UI 조사자가 shadcn 초기화를 제안합니다. 흐름은 다음과 같습니다.
-
-1. `ui.shadcn.com/create`를 방문하여 프리셋을 구성합니다.
-2. 프리셋 문자열을 복사합니다.
-3. `npx shadcn init --preset {paste}`를 실행합니다.
-4. 프리셋은 전체 디자인 시스템(색상, 테두리 반경, 폰트)을 인코딩합니다.
-
-프리셋 문자열은 GSD의 1급 계획 아티팩트가 되어 페이즈와 마일스톤에 걸쳐 재현 가능합니다.
-
-### 레지스트리 안전 게이트
-
-서드파티 shadcn 레지스트리는 임의의 코드를 주입할 수 있습니다. 안전 게이트는 다음을 요구합니다.
-- `npx shadcn view {component}` — 설치 전 검사
-- `npx shadcn diff {component}` — 공식 버전과 비교
-
-`workflow.ui_safety_gate` 설정 토글로 제어됩니다.
-
-### 스크린샷 저장
-
-`/gsd-ui-review`는 Playwright CLI를 통해 `.planning/ui-reviews/`에 스크린샷을 캡처합니다. 바이너리 파일이 git에 포함되지 않도록 `.gitignore`가 자동으로 생성됩니다. 스크린샷은 `/gsd-complete-milestone` 실행 시 정리됩니다.
-
----
-
-## 백로그 및 스레드
-
-### 백로그 파킹 롯
-
-활성 계획에 아직 준비되지 않은 아이디어는 999.x 번호 체계를 사용하여 백로그에 보관하며 활성 페이즈 순서 밖에 유지됩니다.
-
-```
-/gsd-capture --backlog "GraphQL API layer"     # Creates 999.1-graphql-api-layer/
-/gsd-capture --backlog "Mobile responsive"     # Creates 999.2-mobile-responsive/
-```
-
-백로그 항목은 전체 페이즈 디렉터리를 얻으므로 `/gsd-discuss-phase 999.1`로 아이디어를 더 탐구하거나 준비가 되면 `/gsd-plan-phase 999.1`을 사용할 수 있습니다.
-
-`/gsd-review-backlog`으로 **검토 및 승격**합니다 — 모든 백로그 항목을 표시하고 승격 (활성 순서로 이동), 유지 (백로그에 남김), 또는 제거 (삭제)를 선택할 수 있습니다.
-
-### 시드
-
-시드는 트리거 조건이 있는 미래 지향적인 아이디어입니다. 백로그 항목과 달리 시드는 적절한 마일스톤 시점에 자동으로 표면화됩니다.
-
-```
-/gsd-capture --seed "Add real-time collab when WebSocket infra is in place"
-```
-
-시드는 전체 WHY와 언제 표면화할지를 보존합니다. `/gsd-new-milestone`은 모든 시드를 스캔하여 일치 항목을 제시합니다.
-
-**저장 위치:** `.planning/seeds/SEED-NNN-slug.md`
-
-### 지속적인 컨텍스트 스레드
-
-스레드는 여러 세션에 걸쳐 이어지지만 특정 페이즈에 속하지 않는 작업을 위한 경량 교차 세션 지식 저장소입니다.
-
-```
-/gsd-thread                              # List all threads
-/gsd-thread fix-deploy-key-auth          # Resume existing thread
-/gsd-thread "Investigate TCP timeout"    # Create new thread
-```
-
-스레드는 `/gsd-pause-work`보다 가볍습니다. 페이즈 상태나 계획 컨텍스트가 없습니다. 각 스레드 파일에는 목표, 컨텍스트, 참조, 다음 단계 섹션이 포함됩니다.
-
-스레드가 성숙해지면 페이즈(`/gsd-phase`)나 백로그 항목(`/gsd-capture --backlog`)으로 승격할 수 있습니다.
-
-**저장 위치:** `.planning/threads/{slug}.md`
-
----
-
-## 워크스트림
-
-워크스트림을 사용하면 상태 충돌 없이 여러 마일스톤 영역을 동시에 작업할 수 있습니다. 각 워크스트림은 독립적인 `.planning/` 상태를 가지므로 워크스트림 간 전환 시 진행 상황이 덮어쓰이지 않습니다.
-
-**사용 시점:** 서로 다른 관심 영역(예: 백엔드 API와 프론트엔드 대시보드)에 걸친 마일스톤 기능을 독립적으로 계획, 실행 또는 토론하면서 컨텍스트 혼합 없이 작업하고 싶을 때 사용합니다.
-
-### 명령어
-
-| 명령어 | 목적 |
-|--------|------|
-| `/gsd-workstreams create <name>` | 격리된 계획 상태로 새 워크스트림 생성 |
-| `/gsd-workstreams switch <name>` | 활성 컨텍스트를 다른 워크스트림으로 전환 |
-| `/gsd-workstreams list` | 모든 워크스트림과 활성 워크스트림 표시 |
-| `/gsd-workstreams complete <name>` | 워크스트림을 완료로 표시하고 상태 아카이브 |
-
-### 작동 방식
-
-각 워크스트림은 자체 `.planning/` 디렉터리 하위 트리를 유지합니다. 워크스트림을 전환하면 GSD가 활성 계획 컨텍스트를 교체하여 `/gsd-progress`, `/gsd-discuss-phase`, `/gsd-plan-phase` 및 기타 명령어가 해당 워크스트림의 상태로 동작합니다.
-
-이는 `/gsd-workspace --new`(별도 저장소 worktree를 생성)보다 가볍습니다. 워크스트림은 동일한 코드베이스와 git 히스토리를 공유하지만 계획 아티팩트를 격리합니다.
-
----
-
-## 보안
-
-### 심층 방어 (v1.27)
-
-GSD는 LLM 시스템 프롬프트가 되는 마크다운 파일을 생성합니다. 즉 계획 아티팩트로 유입되는 사용자 제어 텍스트는 잠재적인 간접 프롬프트 인젝션 벡터입니다. v1.27에서 중앙화된 보안 강화가 도입되었습니다.
-
-**경로 순회 방지.**
-모든 사용자 제공 파일 경로(`--text-file`, `--prd`)는 프로젝트 디렉터리 내에서 해석되는지 검증합니다. macOS `/var` → `/private/var` 심볼릭 링크 해석을 처리합니다.
-
-**프롬프트 인젝션 감지.**
-`security.cjs` 모듈은 사용자 제공 텍스트가 계획 아티팩트에 입력되기 전에 알려진 인젝션 패턴(역할 재정의, 지시 우회, 시스템 태그 인젝션)을 스캔합니다.
-
-**런타임 훅.**
-- `gsd-prompt-guard.js` — `.planning/`에 대한 Write/Edit 호출에서 인젝션 패턴 스캔 (항상 활성, 권고만)
-- `gsd-workflow-guard.js` — GSD 워크플로우 컨텍스트 밖의 파일 편집 시 경고 (`hooks.workflow_guard`로 선택적 활성화)
-
-**CI 스캐너.**
-`prompt-injection-scan.test.cjs`는 모든 에이전트, 워크플로우, 명령어 파일에서 내장된 인젝션 벡터를 스캔합니다. 테스트 스위트의 일부로 실행됩니다.
-
----
+**게이트 비활성화.** `.planning/config.json`에서 `workflow.context_coverage_gate: false`로 설정하세요(또는 `/gsd-settings`를 통해). 기본값은 `true`입니다.
 
 ### 실행 웨이브 조정
 
-```
+```text
   /gsd-execute-phase N
          │
          ├── Analyze plan dependencies
@@ -353,232 +238,205 @@ GSD는 LLM 시스템 프롬프트가 되는 마크다운 파일을 생성합니�
          │     └── Executor C (fresh 200K context) -> commit
          │
          └── Verifier
-               └── Check codebase against phase goals
-                     │
-                     ├── PASS -> VERIFICATION.md (success)
-                     └── FAIL -> Issues logged for /gsd-verify-work
-```
-
-### 브라운필드 워크플로우 (기존 코드베이스)
-
-```
-  /gsd-map-codebase
-         │
-         ├── Stack Mapper     -> codebase/STACK.md
-         ├── Arch Mapper      -> codebase/ARCHITECTURE.md
-         ├── Convention Mapper -> codebase/CONVENTIONS.md
-         └── Concern Mapper   -> codebase/CONCERNS.md
-                │
-        ┌───────▼──────────┐
-        │ /gsd-new-project │  <- Questions focus on what you're ADDING
-        └──────────────────┘
+               ├── Check codebase against phase goals
+               ├── Test quality audit (disabled tests, circular patterns, assertion strength)
+               │
+               ├── PASS -> VERIFICATION.md (success)
+               └── FAIL -> Issues logged for /gsd-verify-work
 ```
 
 ---
 
-## 명령어 레퍼런스
+## UI 설계 계약
 
-### 핵심 워크플로우
+AI가 생성한 프런트엔드가 시각적으로 일관되지 않은 이유는 Claude Code가 UI에 능숙하지 않아서가 아니라, 실행 전에 설계 계약이 존재하지 않았기 때문입니다. `/gsd-ui-phase`는 계획 전에 설계 계약을 고정하고, `/gsd-ui-review`는 실행 후 결과를 감사합니다.
 
-| 명령어 | 목적 | 사용 시점 |
-|--------|------|----------|
-| `/gsd-new-project` | 전체 프로젝트 초기화: 질문, 조사, 요구사항, 로드맵 | 새 프로젝트 시작 시 |
-| `/gsd-new-project --auto @idea.md` | 문서에서 자동 초기화 | PRD나 아이디어 문서가 준비된 경우 |
-| `/gsd-discuss-phase [N]` | 구현 결정사항 캡처 | 계획 전 구축 방식을 결정할 때 |
-| `/gsd-ui-phase [N]` | UI 설계 계약 생성 | discuss-phase 이후, plan-phase 이전 (프론트엔드 페이즈) |
-| `/gsd-plan-phase [N]` | 조사 + 계획 + 검증 | 페이즈 실행 전 |
-| `/gsd-execute-phase <N>` | 병렬 웨이브로 모든 계획 실행 | 계획이 완료된 후 |
-| `/gsd-verify-work [N]` | 자동 진단을 포함한 수동 UAT | 실행 완료 후 |
-| `/gsd-ship [N]` | 검증된 작업으로 PR 생성 | 검증 통과 후 |
-| `/gsd-fast <text>` | 계획을 완전히 건너뛰는 인라인 간단 작업 | 오타 수정, 설정 변경, 소규모 리팩터링 |
-| `/gsd-progress --next` | 상태 자동 감지 및 다음 단계 실행 | 언제든 — "다음에 무엇을 해야 하나?" |
-| `/gsd-ui-review [N]` | 6개 기둥 기반 시각적 감사 소급 수행 | 실행 또는 verify-work 이후 (프론트엔드 프로젝트) |
-| `/gsd-audit-milestone` | 마일스톤이 완료 정의를 충족했는지 검증 | 마일스톤 완료 전 |
-| `/gsd-complete-milestone` | 마일스톤 아카이브 및 릴리스 태그 생성 | 모든 페이즈 검증 완료 시 |
-| `/gsd-new-milestone [name]` | 다음 버전 사이클 시작 | 마일스톤 완료 후 |
+전체 워크플로우, 구성, shadcn 초기화, 레지스트리 안전 게이트는 [UI 단계 설계](how-to/design-a-ui-phase.md)를 참조하세요.
 
-### 탐색
+**빠른 참조:**
 
-| 명령어 | 목적 | 사용 시점 |
-|--------|------|----------|
-| `/gsd-progress` | 상태 및 다음 단계 표시 | 언제든 -- "지금 어디 있나?" |
-| `/gsd-resume-work` | 마지막 세션의 전체 컨텍스트 복원 | 새 세션 시작 시 |
-| `/gsd-pause-work` | 구조화된 핸드오프 저장 (HANDOFF.json + continue-here.md) | 페이즈 중간에 중단할 때 |
-| `/gsd-pause-work --report` | 작업 및 결과가 포함된 세션 요약 생성 | 세션 종료 시, 이해관계자 공유 시 |
-| `/gsd-help` | 모든 명령어 표시 | 빠른 레퍼런스 |
-| `/gsd-update` | 변경 로그 미리보기와 함께 GSD 업데이트 | 새 버전 확인 시 |
+| 명령어               | 설명                                                     |
+| -------------------- | -------------------------------------------------------- |
+| `/gsd-ui-phase [N]`  | 프런트엔드 단계를 위한 UI-SPEC.md 설계 계약 생성         |
+| `/gsd-ui-review [N]` | 구현된 UI의 소급 6-기둥 시각 감사                        |
 
-### 페이즈 관리
-
-| 명령어 | 목적 | 사용 시점 |
-|--------|------|----------|
-| `/gsd-phase` | 로드맵에 새 페이즈 추가 | 초기 계획 후 범위가 늘어날 때 |
-| `/gsd-phase --insert [N]` | 긴급 작업 삽입 (소수점 번호 체계) | 마일스톤 중간의 긴급 수정 시 |
-| `/gsd-phase --remove [N]` | 미래 페이즈 제거 및 재번호 | 기능 범위 축소 시 |
-| `/gsd-discuss-phase --assumptions [N]` | Claude의 예상 접근 방식 미리 확인 | 계획 전 방향 검증 시 |
-| `/gsd-plan-phase --research-phase [N]` | 심층 에코시스템 조사만 수행 | 복잡하거나 익숙하지 않은 도메인 |
-
-### 브라운필드 및 유틸리티
-
-| 명령어 | 목적 | 사용 시점 |
-|--------|------|----------|
-| `/gsd-map-codebase` | 기존 코드베이스 분석 | 기존 코드에서 `/gsd-new-project` 실행 전 |
-| `/gsd-quick` | GSD 보증을 갖춘 임시 작업 | 버그 수정, 소규모 기능, 설정 변경 |
-| `/gsd-debug [desc]` | 지속적인 상태를 유지하는 체계적인 디버깅 | 문제가 발생했을 때 |
-| `/gsd-forensics` | 워크플로우 실패에 대한 진단 보고서 | 상태, 아티팩트, git 히스토리가 손상된 것 같을 때 |
-| `/gsd-capture [desc]` | 나중을 위한 아이디어 캡처 | 세션 중에 생각이 날 때 |
-| `/gsd-capture --list` | 보류 중인 할 일 목록 | 캡처된 아이디어 검토 시 |
-| `/gsd-settings` | 워크플로우 토글 및 모델 프로필 설정 | 모델 변경, 에이전트 토글 시 |
-| `/gsd-config --profile <profile>` | 빠른 프로필 전환 | 비용/품질 트레이드오프 변경 시 |
-| `/gsd-update --reapply` | 업데이트 후 로컬 수정사항 복원 | 로컬 편집이 있는 상태에서 `/gsd-update` 이후 |
-
-### 코드 품질 및 리뷰
-
-| 명령어 | 목적 | 사용 시점 |
-|--------|------|----------|
-| `/gsd-review --phase N` | 외부 CLI를 통한 교차 AI 동료 리뷰 | 실행 전 계획 검증 시 |
-| `/gsd-pr-branch` | `.planning/` 커밋을 필터링한 깔끔한 PR 브랜치 | 계획 없는 diff로 PR 생성 전 |
-| `/gsd-audit-uat` | 모든 페이즈의 검증 부채 감사 | 마일스톤 완료 전 |
-
-### 백로그 및 스레드
-
-| 명령어 | 목적 | 사용 시점 |
-|--------|------|----------|
-| `/gsd-capture --backlog <desc>` | 백로그 파킹 롯에 아이디어 추가 (999.x) | 활성 계획에 준비되지 않은 아이디어 |
-| `/gsd-review-backlog` | 백로그 항목 승격/유지/제거 | 새 마일스톤 전 우선순위 결정 시 |
-| `/gsd-capture --seed <idea>` | 트리거 조건이 있는 미래 지향적인 아이디어 | 미래 마일스톤에서 표면화되어야 할 아이디어 |
-| `/gsd-thread [name]` | 지속적인 컨텍스트 스레드 | 페이즈 구조 밖의 교차 세션 작업 |
+| 설정                      | 기본값  | 설명                                                        |
+| ------------------------- | ------- | ----------------------------------------------------------- |
+| `workflow.ui_phase`       | `true`  | 프런트엔드 단계를 위한 UI 설계 계약 생성                    |
+| `workflow.ui_safety_gate` | `true`  | 계획 단계에서 프런트엔드 단계에 대해 /gsd-ui-phase 실행 유도 |
 
 ---
 
-## 설정 레퍼런스
+## 스파이킹 및 스케칭
 
-GSD는 프로젝트 설정을 `.planning/config.json`에 저장합니다. `/gsd-new-project` 중에 설정하거나 나중에 `/gsd-settings`로 업데이트할 수 있습니다.
+계획 전에 기술적 타당성을 검증하려면 `/gsd-spike`를, 설계 전에 시각적 방향을 탐색하려면 `/gsd-sketch`를 사용하세요. 두 명령어 모두 `.planning/`에 아티팩트를 저장하고 마무리 동반 명령어를 통해 프로젝트 스킬 시스템과 통합됩니다.
 
-### 전체 config.json 스키마
+전체 워크플로우와 흐름 다이어그램은 [스파이크 및 스케치](how-to/spike-and-sketch.md)를 참조하세요.
 
-```json
-{
-  "mode": "interactive",
-  "granularity": "standard",
-  "model_profile": "balanced",
-  "planning": {
-    "commit_docs": true,
-    "search_gitignored": false
-  },
-  "workflow": {
-    "research": true,
-    "plan_check": true,
-    "verifier": true,
-    "nyquist_validation": true,
-    "ui_phase": true,
-    "ui_safety_gate": true,
-    "research_before_questions": false,
-    "discuss_mode": "standard",
-    "skip_discuss": false
-  },
-  "resolve_model_ids": "anthropic",
-  "hooks": {
-    "context_warnings": true,
-    "workflow_guard": false
-  },
-  "git": {
-    "branching_strategy": "none",
-    "phase_branch_template": "gsd/phase-{phase}-{slug}",
-    "milestone_branch_template": "gsd/{milestone}-{slug}",
-    "quick_branch_template": null
-  }
-}
+**일반적인 흐름:**
+
+```bash
+/gsd-spike "SSE vs WebSocket"     # Validate the approach
+/gsd-spike --wrap-up              # Package learnings
+
+/gsd-sketch "real-time feed UI"   # Explore the design
+/gsd-sketch --wrap-up             # Package decisions
+
+/gsd-discuss-phase N              # Lock in preferences (now informed by spike + sketch)
+/gsd-plan-phase N                 # Plan with confidence
 ```
 
-### 핵심 설정
+---
 
-| 설정 | 옵션 | 기본값 | 제어 대상 |
-|------|------|--------|----------|
-| `mode` | `interactive`, `yolo` | `interactive` | `yolo`는 결정을 자동 승인하고 `interactive`는 각 단계에서 확인합니다 |
-| `granularity` | `coarse`, `standard`, `fine` | `standard` | 페이즈 세분화: 범위를 얼마나 세밀하게 나눌지 (3-5, 5-8, 또는 8-12 페이즈) |
-| `model_profile` | `quality`, `balanced`, `budget`, `inherit` | `balanced` | 각 에이전트의 모델 티어 (아래 표 참고) |
+## 백로그 및 스레드
 
-### 계획 설정
+### 백로그 파킹 랏
 
-| 설정 | 옵션 | 기본값 | 제어 대상 |
-|------|------|--------|----------|
-| `planning.commit_docs` | `true`, `false` | `true` | `.planning/` 파일을 git에 커밋할지 여부 |
-| `planning.search_gitignored` | `true`, `false` | `false` | 광범위한 검색에 `--no-ignore`를 추가하여 `.planning/` 포함 |
+활성 계획에 준비되지 않은 아이디어는 999.x 번호를 사용하여 백로그에 넣어 활성 단계 순서 외부에 보관합니다.
 
-> **참고:** `.planning/`이 `.gitignore`에 있으면 설정 값에 관계없이 `commit_docs`는 자동으로 `false`가 됩니다.
-
-### 워크플로우 토글
-
-| 설정 | 옵션 | 기본값 | 제어 대상 |
-|------|------|--------|----------|
-| `workflow.research` | `true`, `false` | `true` | 계획 전 도메인 조사 |
-| `workflow.plan_check` | `true`, `false` | `true` | 계획 검증 루프 (최대 3회 반복) |
-| `workflow.verifier` | `true`, `false` | `true` | 페이즈 목표에 대한 실행 후 검증 |
-| `workflow.nyquist_validation` | `true`, `false` | `true` | plan-phase 중 검증 아키텍처 조사 및 8번째 plan-check 차원 |
-| `workflow.ui_phase` | `true`, `false` | `true` | 프론트엔드 페이즈를 위한 UI 설계 계약 생성 |
-| `workflow.ui_safety_gate` | `true`, `false` | `true` | plan-phase가 프론트엔드 페이즈에서 /gsd-ui-phase 실행을 유도합니다 |
-| `workflow.research_before_questions` | `true`, `false` | `false` | 토론 질문 이후가 아닌 이전에 조사를 실행합니다 |
-| `workflow.discuss_mode` | `standard`, `assumptions` | `standard` | 토론 방식: 개방형 질문 vs. 코드베이스 기반 가정 |
-| `workflow.skip_discuss` | `true`, `false` | `false` | 자율 모드에서 discuss-phase를 완전히 건너뜁니다. ROADMAP 페이즈 목표에서 최소한의 CONTEXT.md를 작성합니다 |
-
-### 훅 설정
-
-| 설정 | 옵션 | 기본값 | 제어 대상 |
-|------|------|--------|----------|
-| `hooks.context_warnings` | `true`, `false` | `true` | 컨텍스트 윈도우 사용량 경고 |
-| `hooks.workflow_guard` | `true`, `false` | `false` | GSD 워크플로우 컨텍스트 밖의 파일 편집 시 경고 |
-
-익숙한 도메인에서 페이즈를 빠르게 진행하거나 토큰을 절약할 때 워크플로우 토글을 비활성화하세요.
-
-### Git 브랜칭
-
-| 설정 | 옵션 | 기본값 | 제어 대상 |
-|------|------|--------|----------|
-| `git.branching_strategy` | `none`, `phase`, `milestone` | `none` | 브랜치 생성 시점과 방법 |
-| `git.phase_branch_template` | 템플릿 문자열 | `gsd/phase-{phase}-{slug}` | phase 전략의 브랜치 이름 |
-| `git.milestone_branch_template` | 템플릿 문자열 | `gsd/{milestone}-{slug}` | milestone 전략의 브랜치 이름 |
-| `git.quick_branch_template` | 템플릿 문자열 또는 `null` | `null` | `/gsd-quick` 작업의 선택적 브랜치 이름 |
-
-**브랜칭 전략 설명.**
-
-| 전략 | 브랜치 생성 | 범위 | 적합한 경우 |
-|------|------------|------|------------|
-| `none` | 생성 안 함 | N/A | 개인 개발, 간단한 프로젝트 |
-| `phase` | 각 `execute-phase` 시 | 페이즈당 하나의 브랜치 | 페이즈별 코드 리뷰, 세분화된 롤백 |
-| `milestone` | 첫 `execute-phase` 시 | 모든 페이즈가 하나의 브랜치 공유 | 릴리스 브랜치, 버전별 PR |
-
-**템플릿 변수:** `{phase}` = 0 패딩된 번호 (예: "03"), `{slug}` = 소문자 하이픈 이름, `{milestone}` = 버전 (예: "v1.0"), `{num}` / `{quick}` = 빠른 작업 ID (예: "260317-abc").
-
-빠른 작업 브랜칭 예시:
-
-```json
-"git": {
-  "quick_branch_template": "gsd/quick-{num}-{slug}"
-}
+```bash
+/gsd-capture --backlog "GraphQL API layer"     # Creates 999.1-graphql-api-layer/
+/gsd-capture --backlog "Mobile responsive"     # Creates 999.2-mobile-responsive/
 ```
 
-### 모델 프로필 (에이전트별 분류)
+백로그 항목은 전체 단계 디렉터리를 갖추므로, `/gsd-discuss-phase 999.1`로 아이디어를 더 탐색하거나 준비가 되면 `/gsd-plan-phase 999.1`을 사용할 수 있습니다.
 
-| 에이전트 | `quality` | `balanced` | `budget` | `inherit` |
-|----------|-----------|------------|----------|-----------|
-| gsd-planner | Opus | Opus | Sonnet | Inherit |
-| gsd-roadmapper | Opus | Sonnet | Sonnet | Inherit |
-| gsd-executor | Opus | Sonnet | Sonnet | Inherit |
-| gsd-phase-researcher | Opus | Sonnet | Haiku | Inherit |
-| gsd-project-researcher | Opus | Sonnet | Haiku | Inherit |
-| gsd-research-synthesizer | Sonnet | Sonnet | Haiku | Inherit |
-| gsd-debugger | Opus | Sonnet | Sonnet | Inherit |
-| gsd-codebase-mapper | Sonnet | Haiku | Haiku | Inherit |
-| gsd-verifier | Sonnet | Sonnet | Haiku | Inherit |
-| gsd-plan-checker | Sonnet | Sonnet | Haiku | Inherit |
-| gsd-integration-checker | Sonnet | Sonnet | Haiku | Inherit |
+**검토 및 승격**은 `/gsd-review-backlog`으로 합니다 — 모든 백로그 항목을 표시하고 승격(활성 순서로 이동), 유지(백로그에 남기기), 제거(삭제) 중 선택할 수 있습니다.
 
-**프로필 철학.**
-- **quality** -- 모든 의사결정 에이전트에 Opus를 사용하고 읽기 전용 검증에 Sonnet을 사용합니다. 할당량이 충분하고 작업이 중요할 때 사용합니다.
-- **balanced** -- 아키텍처 결정이 이루어지는 계획에만 Opus를 사용하고 나머지는 Sonnet을 사용합니다. 합당한 이유로 기본값입니다.
-- **budget** -- 코드를 작성하는 모든 것에 Sonnet을 사용하고 조사 및 검증에 Haiku를 사용합니다. 대량 작업이나 덜 중요한 페이즈에 사용합니다.
-- **inherit** -- 모든 에이전트가 현재 세션 모델을 사용합니다. 동적으로 모델을 전환할 때 (예: OpenCode 또는 Kilo `/model`) 또는 예상치 못한 API 비용을 방지하기 위해 비Anthropic 공급자 (OpenRouter, 로컬 모델)와 함께 Claude Code를 사용할 때 적합합니다. 비Claude 런타임 (Codex, OpenCode, Gemini CLI, Kilo)의 경우 설치 프로그램이 자동으로 `resolve_model_ids: "omit"`을 설정합니다 — [비Claude 런타임](#비claude-런타임-codex-opencode-gemini-cli-kilo-사용)을 참고하세요.
+### 씨드
+
+씨드는 트리거 조건이 있는 미래 지향적 아이디어입니다. 백로그 항목과 달리, 씨드는 적절한 마일스톤이 도래하면 자동으로 표시됩니다.
+
+```bash
+/gsd-capture --seed "Add real-time collab when WebSocket infra is in place"
+```
+
+`/gsd-new-milestone`은 모든 씨드를 스캔하고 매칭 항목을 표시합니다. **저장소:** `.planning/seeds/SEED-NNN-slug.md`
+
+### 지속적 컨텍스트 스레드
+
+스레드는 여러 세션에 걸쳐 있지만 특정 단계에 속하지 않는 작업을 위한 경량 세션 간 지식 저장소입니다.
+
+```bash
+/gsd-thread                              # List all threads
+/gsd-thread fix-deploy-key-auth          # Resume existing thread
+/gsd-thread "Investigate TCP timeout"    # Create new thread
+```
+
+스레드가 성숙해지면 단계(`/gsd-phase`) 또는 백로그 항목(`/gsd-capture --backlog`)으로 승격할 수 있습니다. **저장소:** `.planning/threads/{slug}.md`
+
+---
+
+## 워크스트림 및 워크스페이스
+
+워크스트림과 워크스페이스 모두 격리를 제공하지만, 수준이 다릅니다.
+
+**워크스트림**은 동일한 코드베이스와 git 히스토리를 공유하지만 계획 아티팩트를 격리합니다 — 더 가볍고, 여러 마일스톤 영역을 동시에 작업할 때 적합합니다. [워크스트림으로 병렬 작업](how-to/work-in-parallel-with-workstreams.md)을 참조하세요.
+
+**워크스페이스**는 자체 `.planning/`을 가진 별도의 리포지토리 워크트리를 생성합니다 — 더 무겁고, 피처 브랜치 또는 멀티 리포지토리 격리에 적합합니다. [워크스페이스로 작업 격리](how-to/isolate-work-with-workspaces.md)를 참조하세요.
+
+| 명령어                             | 목적                                               |
+| ---------------------------------- | ---------------------------------------------------- |
+| `/gsd-workstreams create <name>`   | 격리된 계획 상태로 새 워크스트림 생성              |
+| `/gsd-workstreams switch <name>`   | 활성 컨텍스트를 다른 워크스트림으로 전환           |
+| `/gsd-workstreams list`            | 모든 워크스트림과 활성 상태 표시                   |
+| `/gsd-workstreams complete <name>` | 워크스트림을 완료로 표시하고 상태 아카이브         |
+
+```bash
+# Workspace example — feature branch isolation
+/gsd-workspace --new --name feature-b --repos .
+cd ~/gsd-workspaces/feature-b
+/gsd-new-project
+
+/gsd-workspace --list
+/gsd-workspace --remove feature-b
+```
+
+---
+
+## 보안
+
+### 심층 방어 (v1.27)
+
+GSD는 LLM 시스템 프롬프트가 되는 마크다운 파일을 생성합니다. 즉, 계획 아티팩트로 유입되는 사용자 제어 텍스트는 잠재적인 간접 프롬프트 인젝션 벡터입니다. v1.27은 중앙화된 보안 강화를 도입했습니다:
+
+**경로 순회 방지:** 모든 사용자가 제공한 파일 경로(`--text-file`, `--prd`)는 프로젝트 디렉터리 내에서 확인됩니다. macOS `/var` → `/private/var` 심볼릭 링크 확인이 처리됩니다.
+
+**프롬프트 인젝션 감지:** `security.cjs` 모듈은 사용자가 제공한 텍스트가 계획 아티팩트에 들어가기 전에 알려진 인젝션 패턴을 스캔합니다.
+
+**런타임 훅:**
+
+- `gsd-prompt-guard.js` — `.planning/`에 대한 Write/Edit 호출에서 인젝션 패턴 스캔 (항상 활성, 자문 전용)
+- `gsd-workflow-guard.js` — GSD 워크플로우 컨텍스트 외부에서 파일 편집 시 경고 (`hooks.workflow_guard`를 통한 옵트인)
+
+**CI 스캐너:** `prompt-injection-scan.security.test.cjs`는 모든 에이전트, 워크플로우, 명령어 파일에서 삽입된 인젝션 벡터를 스캔합니다.
+
+---
+
+### 패키지 적법성 게이트 (v1.42.1)
+
+AI 코딩 도구는 패키지 이름을 환각합니다. 공격자는 npm, PyPI, crates.io에 악성 포스트 인스톨 스크립트가 포함된 그 이름을 미리 등록합니다 — 이를 *슬롭스쿼팅*이라 합니다. v1.42.1은 이것이 셸에 도달하기 전에 차단하는 3계층 게이트를 추가합니다.
+
+**RESEARCH.md에서** — 외부 패키지를 권장하는 모든 단계에는 `## Package Legitimacy Audit` 테이블이 포함됩니다:
+
+```markdown
+## Package Legitimacy Audit
+
+| Package | Registry | Age | Downloads | Source Repo | slopcheck | Disposition |
+|---------|----------|-----|-----------|-------------|-----------|-------------|
+| express | npm | 13 yrs | 100M+/wk | github.com/expressjs/express | [OK] | Approved |
+| some-new-util | npm | 3 days | 47 | none | [SLOP] | REMOVED |
+| api-bridge | npm | 6 mo | 1.2k/wk | github.com/user/api-bridge | [SUS] | Flagged |
+```
+
+`[SLOP]` 패키지는 RESEARCH.md에서 완전히 제거되며 계획자에게 도달하지 않습니다.
+
+**PLAN.md에서** — `[SUS]` 또는 `[ASSUMED]` 패키지는 설치 전에 `checkpoint:human-verify` 작업을 트리거합니다.
+
+**실행 중** — 설치가 실패하면 실행자는 체크포인트를 표시하고 자동으로 대안을 시도하지 않고 중단합니다.
+
+**슬롭체크 판정:**
+
+| 판정 | 의미 | GSD 조치 |
+|---------|---------|------------|
+| `[OK]` | 모든 적법성 검사 통과 | 진행 — 체크포인트 없음 |
+| `[SUS]` | 의심스러운 신호 | 표시됨; 계획자가 `checkpoint:human-verify` 추가 |
+| `[SLOP]` | 고신뢰 환각 | RESEARCH.md에서 제거; 계획자에게 도달하지 않음 |
+
+슬롭체크를 수동으로 설치하려면:
+
+```bash
+pip install slopcheck
+# verify: slopcheck install express --json
+```
+
+---
+
+## 코드 리뷰 워크플로우
+
+단계 실행 후 UAT 전에 구조화된 코드 리뷰를 실행하세요. 전체 워크플로우는 [크로스 AI 리뷰 설정](how-to/set-up-cross-ai-review.md)을 참조하세요.
+
+```bash
+/gsd-code-review 3               # Review all changed files in phase 3
+/gsd-code-review 3 --depth=deep  # Deep cross-file review
+/gsd-code-review 3 --fix         # Fix Critical + Warning findings atomically
+/gsd-code-review 3 --fix --auto  # Fix and re-review until clean (max 3 iterations)
+/gsd-audit-fix                   # Audit + classify + fix (medium+ severity, max 5)
+```
+
+리뷰 단계는 실행 후, UAT 전에 삽입됩니다:
+
+```text
+/gsd-execute-phase N  ->  /gsd-code-review N  ->  /gsd-code-review N --fix  ->  /gsd-verify-work N
+```
+
+---
+
+## 명령어 및 구성 레퍼런스
+
+- **명령어 레퍼런스:** 모든 안정적 명령어의 플래그, 서브명령어, 예시는 [`docs/COMMANDS.md`](COMMANDS.md)를 참조하세요.
+- **구성 레퍼런스:** 전체 `config.json` 스키마, 모델 프로필 테이블, git 브랜치 전략, 보안 설정은 [`docs/CONFIGURATION.md`](CONFIGURATION.md)를 참조하세요.
+- **Discuss 모드:** 인터뷰 vs 가정 모드는 [`docs/workflow-discuss-mode.md`](workflow-discuss-mode.md)를 참조하세요.
 
 ---
 
@@ -605,7 +463,7 @@ claude --dangerously-skip-permissions
 /gsd-pause-work --report         # Generate session summary
 ```
 
-### 기존 문서로 새 프로젝트 시작
+### 기존 문서로 새 프로젝트
 
 ```bash
 /gsd-new-project --auto @prd.md   # Auto-runs research/requirements/roadmap from your doc
@@ -616,10 +474,44 @@ claude --dangerously-skip-permissions
 ### 기존 코드베이스
 
 ```bash
-/gsd-map-codebase           # Analyze what exists (parallel agents)
-/gsd-new-project            # Questions focus on what you're ADDING
+/gsd-onboard                # Safely map, ingest docs, and initialize planning
+# Follow printed handoff commands, then rerun /gsd-onboard
 # (normal phase workflow from here)
 ```
+
+**실행 후 드리프트 감지 (#2003).** 매 `/gsd-execute-phase` 후, GSD는 단계가 `.planning/codebase/STRUCTURE.md`를 오래되게 만들 만큼 충분한 구조적 변경을 도입했는지 확인합니다. 다음으로 동작을 변경할 수 있습니다:
+
+```bash
+/gsd-settings workflow.drift_action auto-remap       # remap automatically
+/gsd-settings workflow.drift_threshold 5             # tune sensitivity
+```
+
+### 계획 드리프트 가드
+
+**기본 활성화.** 계획 드리프트 가드(`plan_review.source_grounding: true`)는 계획 검토 중에 실행되며, 계획에 인용된 모든 심볼 — 데코레이터, 클래스, 함수, CLI 플래그 — 이 검토 시점에 실제로 소스 트리에 존재하는지 확인합니다. 이는 실행 에이전트가 실행되기 전에 환각된 이름을 잡아냅니다.
+
+**감지 대상:**
+
+- 소스에 존재하지 않는 PLAN.md 단계에서 참조된 함수
+- 계획 작성 이후 이름이 변경되거나 제거된 클래스 또는 데코레이터 이름
+- 인수 파서에 정의되지 않은 계획의 CLI 플래그
+- 아무 파일로도 확인되지 않는 구현 단계에서 인용된 모듈 경로
+
+**needs-acknowledgement 동작.** 가드가 누락된 심볼을 발견하면, 하드 차단 대신 계획 검토 출력에 `needs-acknowledgement` 알림을 표시합니다. 승인 후 진행하거나(심볼이 의도적으로 새로운 것일 수 있음) 계획 수정을 요청할 수 있습니다. 가드는 계획을 자동으로 거부하지 않으며 — 사람의 결정을 위한 신호를 표시합니다.
+
+**인텔 없이 작동.** 기본적으로 가드는 `grep`/`ripgrep`을 사용하여 소스 파일을 검색합니다 — 사전 인덱싱이 필요하지 않습니다. `intel.enabled: true`로 `/gsd:map-codebase`를 실행했다면 `plan_review.source_grounding_authority: intel`로 설정하여 더 빠른 사전 빌드 `api-map.json` 인덱스를 사용하세요.
+
+```bash
+# Enable/disable (default: on)
+/gsd-settings plan_review.source_grounding true
+/gsd-settings plan_review.source_grounding false
+
+# Switch resolver authority
+/gsd-settings plan_review.source_grounding_authority grep   # live grep (default)
+/gsd-settings plan_review.source_grounding_authority intel  # pre-indexed api-map.json
+```
+
+프로젝트 설정 시(`/gsd:new-project`가 워크플로우 선호도 중 질문) 또는 `/gsd:settings`를 통해 언제든지 전환 가능합니다(계획 섹션 → 드리프트 가드).
 
 ### 빠른 버그 수정
 
@@ -645,86 +537,145 @@ claude --dangerously-skip-permissions
 
 ### 속도 vs 품질 프리셋
 
-| 시나리오 | Mode | Granularity | Profile | Research | Plan Check | Verifier |
-|---------|------|-------------|---------|----------|------------|---------|
-| 프로토타이핑 | `yolo` | `coarse` | `budget` | 끄기 | 끄기 | 끄기 |
-| 일반 개발 | `interactive` | `standard` | `balanced` | 켜기 | 켜기 | 켜기 |
-| 프로덕션 | `interactive` | `fine` | `quality` | 켜기 | 켜기 | 켜기 |
+| 시나리오    | 모드          | 세분화     | 프로필     | 리서치   | 계획 검사  | 검증기   |
+| ----------- | ------------- | ----------- | ---------- | -------- | ---------- | -------- |
+| 프로토타이핑 | `yolo`        | `coarse`    | `budget`   | off      | off        | off      |
+| 일반 개발   | `interactive` | `standard`  | `balanced` | on       | on         | on       |
+| 프로덕션    | `interactive` | `fine`      | `quality`  | on       | on         | on       |
 
-**자율 모드에서 discuss-phase 건너뛰기:** PROJECT.md에 선호도가 이미 충분히 캡처된 `yolo` 모드에서 실행할 때 `/gsd-settings`에서 `workflow.skip_discuss: true`로 설정하세요. 이렇게 하면 discuss-phase를 완전히 우회하고 ROADMAP 페이즈 목표에서 파생된 최소한의 CONTEXT.md를 작성합니다. PROJECT.md와 관례가 충분히 포괄적이어서 토론이 새로운 정보를 제공하지 않을 때 유용합니다.
+**자율 모드에서 discuss 단계 건너뛰기:** `yolo` 모드로 실행할 때는 `/gsd-settings`를 통해 `workflow.skip_discuss: true`로 설정하세요.
 
 ### 마일스톤 중간 범위 변경
 
 ```bash
-/gsd-phase              # Append a new phase to the roadmap
-# or
-/gsd-phase --insert 3         # Insert urgent work between phases 3 and 4
-# or
-/gsd-phase --remove 7         # Descope phase 7 and renumber
+/gsd-phase                  # Append a new phase to the roadmap (default mode)
+/gsd-phase --insert 3       # Insert urgent work between phases 3 and 4
+/gsd-phase --remove 7       # Descope phase 7 and renumber
+/gsd-phase --edit 4         # Edit any field of phase 4 in place
 ```
-
-### 멀티 프로젝트 워크스페이스
-
-격리된 GSD 상태로 여러 저장소나 기능을 병렬로 작업합니다.
-
-```bash
-# Create a workspace with repos from your monorepo
-/gsd-workspace --new --name feature-b --repos hr-ui,ZeymoAPI
-
-# Feature branch isolation — worktree of current repo with its own .planning/
-/gsd-workspace --new --name feature-b --repos .
-
-# Then cd into the workspace and initialize GSD
-cd ~/gsd-workspaces/feature-b
-/gsd-new-project
-
-# List and manage workspaces
-/gsd-workspace --list
-/gsd-workspace --remove feature-b
-```
-
-각 워크스페이스는 다음을 포함합니다.
-- 자체 `.planning/` 디렉터리 (원본 저장소와 완전히 독립)
-- 지정된 저장소의 git worktree (기본값) 또는 클론
-- 멤버 저장소를 추적하는 `WORKSPACE.md` 매니페스트
 
 ---
 
 ## 문제 해결
 
-### "Project already initialized"
+포괄적인 문제 해결 가이드는 [복구 및 문제 해결](how-to/recover-and-troubleshoot.md)을 참조하세요. 가장 일반적인 문제들이 아래에 요약되어 있습니다.
 
-`.planning/PROJECT.md`가 이미 존재하는데 `/gsd-new-project`를 실행했습니다. 이것은 안전 검사입니다. 처음부터 다시 시작하려면 먼저 `.planning/` 디렉터리를 삭제하세요.
+### 프로그래밍 방식 CLI (`gsd-tools query` vs `gsd-tools.cjs`)
+
+자동화를 위해서는 등록된 서브명령어와 함께 **`gsd-tools query`**를 사용하세요([CLI-TOOLS.md — SDK 및 프로그래밍 방식 액세스](CLI-TOOLS.md#sdk-and-programmatic-access)와 QUERY-HANDLERS.md 참조). 레거시 `node $HOME/.claude/get-shit-done/bin/gsd-tools.cjs` CLI도 계속 지원됩니다.
+
+### STATE.md 동기화 오류
+
+```bash
+node "$HOME/.claude/get-shit-done/bin/gsd-tools.cjs" state validate          # Detect drift
+node "$HOME/.claude/get-shit-done/bin/gsd-tools.cjs" state sync --verify     # Preview changes
+node "$HOME/.claude/get-shit-done/bin/gsd-tools.cjs" state sync              # Reconstruct STATE.md
+```
+
+### "Spawning..." 이후 명령어가 멈춘 것처럼 보일 때
+
+GSD 서브에이전트는 별도의 컨텍스트 창에서 실행됩니다 — 진행 중에는 부모 세션에서 보이지 않습니다. 세션을 중단하지 마세요. 결과를 기다리세요; 리서치 및 계획 에이전트는 일반적으로 1~5분이 소요됩니다.
 
 ### 긴 세션 중 컨텍스트 저하
 
-주요 명령어 사이에 컨텍스트 윈도우를 지우세요: Claude Code에서 `/clear`를 사용합니다. GSD는 새로운 컨텍스트를 기반으로 설계되었습니다 — 모든 서브에이전트는 깨끗한 200K 윈도우를 받습니다. 메인 세션의 품질이 저하되면 지우고 `/gsd-resume-work` 또는 `/gsd-progress`를 사용하여 상태를 복원하세요.
+주요 명령어 사이에 컨텍스트 창을 지우세요: Claude Code에서 `/clear`. GSD는 새로운 컨텍스트를 중심으로 설계되었습니다 — 모든 서브에이전트는 새로운 200K 창을 받습니다. 지운 후 상태를 복원하려면 `/gsd-resume-work` 또는 `/gsd-progress`를 사용하세요.
 
-### 계획이 잘못되거나 맞지 않는 경우
+### 계획이 잘못되거나 정렬되지 않은 것 같을 때
 
-계획 전에 `/gsd-discuss-phase [N]`을 실행하세요. 대부분의 계획 품질 문제는 `CONTEXT.md`가 있었다면 방지할 수 있었던 가정을 Claude가 세우기 때문에 발생합니다. `/gsd-discuss-phase --assumptions [N]`을 실행하여 계획에 동의하기 전에 Claude가 무엇을 하려는지 확인할 수도 있습니다.
+계획 전에 `/gsd-discuss-phase [N]`을 실행하세요. 대부분의 계획 품질 문제는 `CONTEXT.md`가 방지했을 가정을 Claude가 만들어서 발생합니다.
 
-### 실행이 실패하거나 스텁을 생성하는 경우
+### 실행 실패 또는 스텁 생성
 
-계획이 너무 야심차지 않은지 확인하세요. 계획에는 최대 2-3개의 작업이 있어야 합니다. 작업이 너무 크면 단일 컨텍스트 윈도우에서 안정적으로 처리할 수 있는 범위를 초과합니다. 더 작은 범위로 재계획하세요.
+계획이 너무 야심 찼는지 확인하세요. 계획에는 최대 2~3개의 작업이 있어야 합니다. 더 작은 범위로 재계획하세요.
 
-### 현재 위치를 잃어버린 경우
+### 현재 위치를 놓쳤을 때
 
-`/gsd-progress`를 실행하세요. 모든 상태 파일을 읽고 현재 위치와 다음에 할 일을 정확히 알려줍니다.
+`/gsd-progress`를 실행하세요. 모든 상태 파일을 읽고 정확히 어디에 있는지, 다음에 무엇을 해야 하는지 알려줍니다.
 
-### 실행 후 변경이 필요한 경우
+### 모델 비용이 너무 높을 때
 
-`/gsd-execute-phase`를 다시 실행하지 마세요. 목표를 정확히 수정하려면 `/gsd-quick`을 사용하거나 UAT를 통해 체계적으로 문제를 식별하고 수정하려면 `/gsd-verify-work`를 사용하세요.
+예산 프로필로 전환하세요: `/gsd-config --profile budget`. 도메인이 익숙하다면 `/gsd-settings`를 통해 리서치 및 계획 검사 에이전트를 비활성화하세요.
 
-### 모델 비용이 너무 높은 경우
+### 단계별 모델 비용 조정 (`models`) — v1.40에서 추가됨
 
-예산 프로필로 전환하세요: `/gsd-config --profile budget`. 도메인이 익숙하다면 (또는 Claude에게 익숙하다면) `/gsd-settings`에서 조사 및 plan-check 에이전트를 비활성화하세요.
+`.planning/config.json`에 `models` 블록을 추가하세요:
 
-### 비Claude 런타임 사용 (Codex, OpenCode, Gemini CLI, Kilo)
+```json
+{
+  "model_profile": "balanced",
+  "models": {
+    "planning": "opus",
+    "discuss": "opus",
+    "research": "sonnet",
+    "execution": "opus",
+    "verification": "sonnet",
+    "completion": "sonnet"
+  }
+}
+```
 
-비Claude 런타임용으로 GSD를 설치했다면 설치 프로그램이 이미 모든 에이전트가 런타임의 기본 모델을 사용하도록 모델 해석을 구성했습니다. 수동 설정이 필요하지 않습니다. 구체적으로 설치 프로그램은 config에 `resolve_model_ids: "omit"`을 설정하여 GSD가 Anthropic 모델 ID 해석을 건너뛰고 런타임이 자체 기본 모델을 선택하도록 합니다.
+에이전트별 예외가 필요한가요? 옆에 `model_overrides`를 추가하세요 — `models`보다 우선합니다:
 
-비Claude 런타임에서 에이전트별로 다른 모델을 할당하려면 런타임이 인식하는 완전한 자격을 갖춘 모델 ID와 함께 `.planning/config.json`에 `model_overrides`를 추가하세요.
+```json
+{
+  "models": { "research": "sonnet" },
+  "model_overrides": {
+    "gsd-codebase-mapper": "haiku"
+  }
+}
+```
+
+전체 매핑 테이블과 해결 우선순위 규칙은 [단계 유형별 모델](CONFIGURATION.md#per-phase-type-models-models--added-in-v140)을 참조하세요.
+
+### `dynamic_routing`으로 기본 저렴한 비용 — v1.40에서 추가됨
+
+```json
+{
+  "dynamic_routing": {
+    "enabled": true,
+    "tier_models": {
+      "light":    "haiku",
+      "standard": "sonnet",
+      "heavy":    "opus"
+    },
+    "escalate_on_failure": true,
+    "max_escalations": 1
+  }
+}
+```
+
+전체 에이전트 → 티어 매핑은 [동적 라우팅](CONFIGURATION.md#dynamic-routing-with-failure-tier-escalation-dynamic_routing--added-in-v140)을 참조하세요.
+
+### 턴당 비용을 줄이기 위해 MCP 서버 정리
+
+`model_profile` 또는 `models.<phase_type>`을 조정하기 전에, 하네스에서 어떤 **MCP 서버**가 활성화되어 있는지 감사하세요. 활성화된 모든 MCP 서버는 모든 턴에 도구 스키마를 주입합니다 — 대형 서버는 각각 20k+ 토큰을 소비할 수 있습니다.
+
+이것은 **하네스 설정**이며, GSD 설정이 아닙니다. 토글은 `.claude/settings.json`에 있습니다:
+
+```json
+{
+  "enabledMcpjsonServers": ["context7"],
+  "disabledMcpjsonServers": ["playwright", "mac-tools"]
+}
+```
+
+긴 단계 전 빠른 감사:
+
+- 이 단계에 UI 작업이 없는데 브라우저/playwright 도구가 활성화되어 있나요?
+- 필요하지 않은 플랫폼별 도구가 활성화되어 있나요?
+- 다른 프로젝트에서 사용하던 프로젝트별 MCP가 여기서도 활성화되어 있나요?
+
+비활성화된 서버는 이후 모든 턴에서 스키마를 제거합니다. MCP 정리는 `model_profile` 조정과 **복합**됩니다 — 두 레버는 가산적이며, MCP 절약은 오케스트레이터가 생성하는 모든 서브에이전트에서 즉시 나타납니다.
+
+전체 감사, 하네스 레퍼런스, `model_profile`과의 구성 노트는 번들된 `context-budget.md` 레퍼런스의 [MCP 도구 스키마 비용](../../get-shit-done/references/context-budget.md#mcp-tool-schema-cost-harness-concern)을 참조하세요.
+
+### 비 Claude 런타임 사용 (Codex, OpenCode, Gemini CLI, Kilo)
+
+> **Codex CLI 최소 지원 버전: `0.130.0`** (이슈 [#3562](https://github.com/open-gsd/gsd-core/issues/3562)).
+
+비 Claude 런타임용으로 GSD를 설치했다면, 설치 프로그램이 이미 모델 해석을 구성했습니다. 수동 설정이 필요하지 않습니다 — `resolve_model_ids: "omit"`이 자동으로 설정되어 GSD가 Anthropic 모델 ID 해석을 건너뛰고 런타임이 자체 기본 모델을 선택하도록 합니다.
+
+비 Claude 런타임에서 다른 모델을 할당하려면:
 
 ```json
 {
@@ -737,78 +688,159 @@ cd ~/gsd-workspaces/feature-b
 }
 ```
 
-설치 프로그램은 Gemini CLI, OpenCode, Kilo, Codex에 대해 `resolve_model_ids: "omit"`을 자동으로 구성합니다. 비Claude 런타임을 수동으로 설정하는 경우 직접 `.planning/config.json`에 추가하세요.
+#### 하나의 구성 변경으로 Claude에서 Codex로 전환 (#2517)
 
-전체 설명은 [Configuration Reference](CONFIGURATION.md#non-claude-runtimes-codex-opencode-gemini-cli-kilo)를 참고하세요.
+```json
+{
+  "runtime": "codex",
+  "model_profile": "balanced"
+}
+```
 
-### 비Anthropic 공급자와 함께 Claude Code 사용 (OpenRouter, 로컬)
+[런타임 인식 프로필](CONFIGURATION.md#runtime-aware-profiles-2517)을 참조하세요.
 
-GSD 서브에이전트가 Anthropic 모델을 호출하는데 OpenRouter나 로컬 공급자를 통해 비용을 지불하고 있다면 `inherit` 프로필로 전환하세요: `/gsd-config --profile inherit`. 이렇게 하면 모든 에이전트가 특정 Anthropic 모델 대신 현재 세션 모델을 사용합니다. `/gsd-settings` → Model Profile → Inherit도 참고하세요.
+### 수동 설치 / Node.js 없는 설정
 
-### 민감하거나 비공개 프로젝트에서 작업하는 경우
+GSD 설치 프로그램을 실행할 수 없다면, `agents/`의 소스 파일을 직접 사용할 수 없습니다 — 이는 Claude Code의 네이티브 frontmatter 형식입니다. OpenCode의 경우 두 가지 변환이 필요합니다:
 
-`/gsd-new-project` 중에 또는 `/gsd-settings`에서 `commit_docs: false`로 설정하세요. `.planning/`을 `.gitignore`에 추가하세요. 계획 아티팩트는 로컬에 유지되며 git에 절대 포함되지 않습니다.
+| 필드 | GSD 소스 형식 | OpenCode 유효 형식 | 조치 |
+|---|---|---|---|
+| `tools:` | `Read, Bash, Grep` (콤마 문자열) | frontmatter 필드가 아님 | `tools:` 줄 전체 제거 |
+| `color:` | 일반 CSS 색상 이름 | 16진수 또는 OpenCode 의미 이름 | 16진수로 변환하거나 제거 |
 
-### GSD 업데이트가 로컬 변경사항을 덮어쓴 경우
+**대안:** Node.js가 있는 모든 머신에서 설치 프로그램 실행:
 
-v1.17부터 설치 프로그램이 로컬로 수정된 파일을 `gsd-local-patches/`에 백업합니다. 변경사항을 다시 병합하려면 `/gsd-update --reapply`를 실행하세요.
+```bash
+npx @opengsd/gsd-core@latest --opencode --global
+```
+
+### Cline용 설치
+
+```bash
+npx @opengsd/gsd-core --cline --global   # applies to all projects
+npx @opengsd/gsd-core --cline --local    # this project only
+```
+
+### CodeBuddy용 설치
+
+```bash
+npx @opengsd/gsd-core --codebuddy --global
+```
+
+### Qwen Code용 설치
+
+```bash
+npx @opengsd/gsd-core --qwen --global
+```
+
+### 프리릴리스 에디션 설치
+
+설치 프로그램 실행 전에 런타임의 `*_CONFIG_DIR` 환경 변수를 프리릴리스 디렉터리로 설정하세요:
+
+```bash
+WINDSURF_CONFIG_DIR=~/.codeium/windsurf-next npx @opengsd/gsd-core@latest --windsurf --global
+```
+
+**지원 런타임의 환경 변수 레퍼런스:**
+
+| 런타임 | 안정 기본값 | 재정의 환경 변수 |
+|---|---|---|
+| Claude Code | `~/.claude` | `CLAUDE_CONFIG_DIR` |
+| Gemini CLI | `~/.gemini` | `GEMINI_CONFIG_DIR` |
+| OpenCode | `XDG_CONFIG_HOME/opencode` | `OPENCODE_CONFIG_DIR` |
+| Codex | (Codex CLI에 따름) | `--config-dir` 플래그 |
+| Copilot | `~/.copilot` | `COPILOT_CONFIG_DIR` |
+| Cursor | `~/.cursor` | `CURSOR_CONFIG_DIR` |
+| Windsurf | `~/.codeium/windsurf` | `WINDSURF_CONFIG_DIR` |
+| Antigravity | 자동 감지 | `ANTIGRAVITY_CONFIG_DIR` |
+| Augment | `~/.augment` | `AUGMENT_CONFIG_DIR` |
+| Trae | `~/.trae` | `TRAE_CONFIG_DIR` |
+| Qwen Code | `~/.qwen` | `QWEN_CONFIG_DIR` |
+| Kilo | `~/.config/kilo` | `KILO_CONFIG_DIR` |
+| CodeBuddy | `~/.codebuddy` | `CODEBUDDY_CONFIG_DIR` |
+| Cline | `~/.cline` | `CLINE_CONFIG_DIR` |
+
+### 비 Anthropic 프로바이더와 Claude Code 사용
+
+`inherit` 프로필로 전환하세요: `/gsd-config --profile inherit`. 이렇게 하면 모든 에이전트가 현재 세션 모델을 사용합니다.
+
+### 민감/비공개 프로젝트 작업
+
+`/gsd-new-project` 중 또는 `/gsd-settings`를 통해 `commit_docs: false`로 설정하세요. `.planning/`을 `.gitignore`에 추가하세요.
+
+### GSD 업데이트가 로컬 변경사항을 덮어씀
+
+v1.17부터 설치 프로그램은 로컬에서 수정된 파일을 `gsd-local-patches/`에 백업합니다. 변경사항을 다시 병합하려면 `/gsd-update --reapply`를 실행하세요.
+
+### npm을 통해 업데이트할 수 없음
+
+단계별 수동 업데이트 절차는 [docs/manual-update.md](../manual-update.md)를 참조하세요.
 
 ### 워크플로우 진단 (`/gsd-forensics`)
 
-워크플로우가 명확하지 않은 방식으로 실패할 때 — 계획이 존재하지 않는 파일을 참조하거나 실행이 예상치 못한 결과를 생성하거나 상태가 손상된 것 같을 때 — `/gsd-forensics`를 실행하여 진단 보고서를 생성하세요.
+워크플로우가 명확하지 않은 방식으로 실패하면 `/gsd-forensics`를 실행하여 git 히스토리 이상, 아티팩트 무결성, 상태 불일치를 포함한 진단 보고서를 생성하세요. 출력은 `.planning/forensics/`로 이동합니다.
 
-**검사 항목.**
-- Git 히스토리 이상 (고아 커밋, 예상치 못한 브랜치 상태, rebase 아티팩트)
-- 아티팩트 무결성 (누락되거나 잘못된 계획 파일, 끊어진 교차 참조)
-- 상태 불일치 (실제 파일 존재 여부 대비 ROADMAP 상태, 설정 드리프트)
+### 실행기 서브에이전트가 Bash 명령어에서 "Permission denied" 발생
 
-**출력:** 발견사항과 권장 수정 단계가 포함된 `.planning/forensics/`의 진단 보고서.
+`~/.claude/settings.json`에 필요한 패턴을 추가하세요. 모든 스택에 필요한 핵심 패턴:
 
-### 서브에이전트가 실패한 것 같지만 작업이 완료된 경우
+```json
+"Bash(git add:*)",
+"Bash(git commit:*)",
+"Bash(git merge:*)",
+"Bash(git worktree:*)",
+"Bash(git rebase:*)",
+"Bash(git reset:*)",
+"Bash(git checkout:*)",
+"Bash(git switch:*)",
+"Bash(git restore:*)",
+"Bash(git stash:*)",
+"Bash(git rm:*)",
+"Bash(git mv:*)",
+"Bash(git fetch:*)",
+"Bash(git cherry-pick:*)",
+"Bash(git apply:*)",
+"Bash(gh:*)"
+```
 
-Claude Code 분류 버그에 대한 알려진 해결 방법이 있습니다. GSD의 오케스트레이터 (execute-phase, quick)는 실패를 보고하기 전에 실제 출력을 현장 확인합니다. 실패 메시지가 표시되었지만 커밋이 이루어진 경우 `git log`를 확인하세요 — 작업이 성공했을 수 있습니다.
+**프로젝트별 권한:** `~/.claude/settings.json` 대신 프로젝트 루트의 `.claude/settings.local.json`에 동일한 `permissions.allow` 블록을 추가하세요.
 
-### 병렬 실행으로 인한 빌드 잠금 오류
+### 병렬 실행으로 빌드 잠금 오류 발생
 
-병렬 웨이브 실행 중에 pre-commit 훅 실패, cargo lock 경합, 또는 30분 이상의 실행 시간이 발생한다면 여러 에이전트가 동시에 빌드 도구를 실행하기 때문입니다. GSD는 v1.26부터 이를 자동으로 처리합니다 — 병렬 에이전트는 커밋에 `--no-verify`를 사용하고 오케스트레이터가 각 웨이브 후 한 번 훅을 실행합니다. 이전 버전을 사용하는 경우 프로젝트의 `CLAUDE.md`에 다음을 추가하세요.
+GSD는 v1.26부터 이를 자동으로 처리합니다. 이전 버전을 사용 중이라면 프로젝트의 `CLAUDE.md`에 다음을 추가하세요:
 
 ```markdown
 ## Git Commit Rules for Agents
 All subagent/executor commits MUST use `--no-verify`.
 ```
 
-병렬 실행을 완전히 비활성화하려면: `/gsd-settings` → `parallelization.enabled`를 `false`로 설정합니다.
-
-### Windows: 보호된 디렉터리에서 설치 충돌
-
-Windows에서 설치 프로그램이 `EPERM: operation not permitted, scandir`으로 충돌하는 경우 OS 보호 디렉터리 (예: Chromium 브라우저 프로필) 때문입니다. v1.24부터 수정되었으니 최신 버전으로 업데이트하세요. 해결 방법으로 설치 프로그램을 실행하기 전에 문제가 되는 디렉터리를 임시로 이름을 변경하세요.
+병렬 실행을 완전히 비활성화하려면: `/gsd-settings` → `parallelization.enabled`를 `false`로 설정하세요.
 
 ---
 
-## 복구 빠른 레퍼런스
+## 복구 빠른 참조
 
-| 문제 | 해결 방법 |
-|------|----------|
-| 컨텍스트 손실 / 새 세션 | `/gsd-resume-work` 또는 `/gsd-progress` |
-| 페이즈가 잘못됨 | 페이즈 커밋에 `git revert` 후 재계획 |
-| 범위 변경 필요 | `/gsd-phase`, `/gsd-phase --insert`, 또는 `/gsd-phase --remove` |
-| 무언가 고장남 | `/gsd-debug "description"` |
-| 워크플로우 상태 손상 의심 | `/gsd-forensics` |
-| 빠른 목표 수정 | `/gsd-quick` |
-| 계획이 비전과 맞지 않음 | `/gsd-discuss-phase [N]` 후 재계획 |
-| 비용이 높아짐 | `/gsd-config --profile budget` 및 `/gsd-settings`에서 에이전트 비활성화 |
-| 업데이트가 로컬 변경사항 파괴 | `/gsd-update --reapply` |
-| 이해관계자를 위한 세션 요약 필요 | `/gsd-pause-work --report` |
-| 다음 단계를 모르겠음 | `/gsd-progress --next` |
-| 병렬 실행 빌드 오류 | GSD 업데이트 또는 `parallelization.enabled: false` 설정 |
+| 문제                                 | 해결책                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------ |
+| 컨텍스트 손실 / 새 세션              | `/gsd-resume-work` 또는 `/gsd-progress`                                  |
+| 단계가 잘못됨                        | 단계 커밋을 `git revert`한 후 재계획                                     |
+| 범위 변경 필요                       | `/gsd-phase` (기본), `/gsd-phase --insert`, 또는 `/gsd-phase --remove`   |
+| 무언가 고장남                        | `/gsd-debug "description"` (수정 없이 분석만 하려면 `--diagnose` 추가)   |
+| STATE.md 동기화 오류                 | `state validate` 후 `state sync`                                         |
+| 워크플로우 상태가 손상된 것 같음     | `/gsd-forensics`                                                         |
+| 빠른 목표 수정                       | `/gsd-quick`                                                             |
+| 계획이 비전과 맞지 않음              | `/gsd-discuss-phase [N]` 후 재계획                                       |
+| 비용이 높아짐                        | `/gsd-config --profile budget` 및 `/gsd-settings`로 에이전트 끄기       |
+| 업데이트가 로컬 변경사항을 손상시킴  | `/gsd-update --reapply`                                                  |
+| 이해관계자를 위한 세션 요약 필요     | `/gsd-pause-work --report`                                               |
+| 다음 단계를 모름                     | `/gsd-progress --next`                                                   |
+| 병렬 실행 빌드 오류                  | GSD 업데이트 또는 `parallelization.enabled: false` 설정                  |
 
 ---
 
 ## 프로젝트 파일 구조
 
-참고로 GSD가 프로젝트에 생성하는 파일 구조입니다.
-
-```
+```text
 .planning/
   PROJECT.md              # Project vision and context (always loaded)
   REQUIREMENTS.md         # Scoped v1/v2 requirements with IDs
@@ -824,7 +856,16 @@ Windows에서 설치 프로그램이 `EPERM: operation not permitted, scandir`�
     done/                 # Completed todos
   debug/                  # Active debug sessions
     resolved/             # Archived debug sessions
-  codebase/               # Brownfield codebase mapping (from /gsd-map-codebase)
+  spikes/                 # Feasibility experiments (from /gsd-spike)
+    NNN-name/             # Experiment code + README with verdict
+    MANIFEST.md           # Index of all spikes
+  sketches/               # HTML mockups (from /gsd-sketch)
+    NNN-name/             # index.html (2-3 variants) + README
+    themes/
+      default.css         # Shared CSS variables for all sketches
+    MANIFEST.md           # Index of all sketches with winners
+  codebase/               # Brownfield codebase mapping (from /gsd-map-codebase or /gsd-onboard)
+  onboarding/             # Brownfield onboarding summary (from /gsd-onboard)
   phases/
     XX-phase-name/
       XX-YY-PLAN.md       # Atomic execution plans
@@ -836,3 +877,12 @@ Windows에서 설치 프로그램이 `EPERM: operation not permitted, scandir`�
       XX-UI-REVIEW.md     # Visual audit scores (from /gsd-ui-review)
   ui-reviews/             # Screenshots from /gsd-ui-review (gitignored)
 ```
+
+---
+
+## 관련 문서
+
+- [문서 인덱스](README.md)
+- [명령어](COMMANDS.md)
+- [구성](CONFIGURATION.md)
+- [단계 루프](explanation/the-phase-loop.md)

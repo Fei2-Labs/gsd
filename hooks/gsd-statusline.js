@@ -6,6 +6,11 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+// Namespace (not destructured) so tests can inject spawn failures by
+// monkeypatching childProcess.execFileSync.
+const childProcess = require('child_process');
+const { isSemverNewer } = require('../gsd-core/bin/lib/semver-compare.cjs');
+const { PACKAGE_NAME, updateCacheFileName } = require('../gsd-core/bin/lib/package-identity.cjs');
 
 // --- Config + last-command readers ------------------------------------------
 
@@ -284,6 +289,129 @@ function formatGsdState(s) {
   return parts.join(' · ');
 }
 
+// --- Context token count (opt-in) ---------------------------------------------
+
+/**
+ * Format a token count compactly: 156342 → '156k', 1234567 → '1.2M'.
+ */
+function formatTokens(tokens) {
+  // Promote to the M branch when k-rounding would reach 1000 (999,500-999,999
+  // must render "1.0M", never "1000k").
+  if (tokens >= 1000000 || Math.round(tokens / 1000) >= 1000) {
+    return (tokens / 1000000).toFixed(1) + 'M';
+  }
+  if (tokens >= 1000) return Math.round(tokens / 1000) + 'k';
+  return String(tokens);
+}
+
+/**
+ * Pure function: build the token-count suffix for the context meter from the
+ * hook input's context_window.current_usage block. Sums input, cache-creation,
+ * cache-read, and output tokens (the same total Claude Code's /context shows).
+ * Returns ' (156k)' or '' when usage is absent/empty.
+ */
+function contextTokenSuffix(currentUsage) {
+  if (!currentUsage || typeof currentUsage !== 'object') return '';
+  const total = (Number(currentUsage.input_tokens) || 0) +
+    (Number(currentUsage.cache_creation_input_tokens) || 0) +
+    (Number(currentUsage.cache_read_input_tokens) || 0) +
+    (Number(currentUsage.output_tokens) || 0);
+  return total > 0 ? ` (${formatTokens(total)})` : '';
+}
+
+// --- Model name --------------------------------------------------------------
+
+/**
+ * Collapse the verbose " (… context)" model-name suffix Claude Code sends for
+ * long-context sessions (e.g. "Sonnet 4.5 (1M context)") to a compact badge
+ * (" (1M)"). The signal is preserved; the width isn't. Tolerant by design
+ * (issue #2160 approval condition): any trailing parenthesized token ending
+ * in "context" is collapsed — a future "(500K context)" becomes "(500K)"
+ * rather than silently no-opping. The token's own casing is preserved.
+ * Any other display name passes through unchanged.
+ */
+function compactModelName(name) {
+  if (typeof name !== 'string') return name;
+  return name.replace(/\s*\(([^)]+?)\s+(?:context|ctx)\)$/i, ' ($1)');
+}
+
+// --- Git segment (opt-in) ------------------------------------------------------
+//
+// Opt-in via `statusline.show_git: true` in .planning/config.json. Renders the
+// current branch plus compact work-state markers after the directory segment:
+//   " │ main+2~1?3↑1"  (staged / unstaged / untracked / ahead / behind)
+//   " │ main✓"         (clean, in sync)
+// One `git status --porcelain=v2 --branch` spawn per render — no shell, args
+// are a fixed array, and the workspace dir is passed via -C. Fails silently
+// (segment absent) outside a repo, without git, or on timeout.
+
+const GIT_STATUS_TIMEOUT_MS = 1500;
+
+/**
+ * Run `git status --porcelain=v2 --branch` in dir.
+ * Returns raw stdout, or null when git is missing, dir isn't a repo, or the
+ * call times out. Never throws.
+ */
+function readGitStatus(dir) {
+  try {
+    // 8 MiB maxBuffer (default 1 MiB) headroom for repos with very many changed
+    // or untracked files; overflow still degrades safely to segment-absent via
+    // the catch below.
+    return childProcess.execFileSync('git', ['-C', dir, 'status', '--porcelain=v2', '--branch'],
+      { encoding: 'utf8', timeout: GIT_STATUS_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Pure function: parse `git status --porcelain=v2 --branch` output.
+ *
+ * Returns { branch, ahead, behind, staged, unstaged, untracked } or null when
+ * the text carries no branch header (not a repo / unparseable). Detached HEAD
+ * reports branch "(detached)" — porcelain v2's literal spelling, shown as-is.
+ * Unmerged (conflict) entries count as unstaged: they're pending work either way.
+ */
+function parseGitStatus(text) {
+  if (typeof text !== 'string') return null;
+  const info = { branch: null, ahead: 0, behind: 0, staged: 0, unstaged: 0, untracked: 0 };
+  for (const line of text.split('\n')) {
+    if (line.startsWith('# branch.head ')) {
+      info.branch = line.slice('# branch.head '.length).trim() || null;
+    } else if (line.startsWith('# branch.ab ')) {
+      const m = line.match(/\+(\d+) -(\d+)/);
+      if (m) { info.ahead = parseInt(m[1], 10); info.behind = parseInt(m[2], 10); }
+    } else if (line.startsWith('1 ') || line.startsWith('2 ')) {
+      // Changed / renamed entries: XY pair at cols 2-3, '.' = unmodified side
+      const xy = line.slice(2, 4);
+      if (xy[0] !== '.') info.staged++;
+      if (xy[1] !== '.') info.unstaged++;
+    } else if (line.startsWith('u ')) {
+      info.unstaged++;
+    } else if (line.startsWith('? ')) {
+      info.untracked++;
+    }
+  }
+  return info.branch ? info : null;
+}
+
+/**
+ * Pure function: format parsed git info into the statusline segment, divider
+ * included (mirrors lastCmdSuffix). Branch is dimmed to match the directory
+ * segment; markers keep their own colors. Returns '' when info is absent.
+ */
+function buildGitSegment(info) {
+  if (!info || !info.branch) return '';
+  const markers = [];
+  if (info.staged) markers.push(`\x1b[32m+${info.staged}\x1b[0m`);
+  if (info.unstaged) markers.push(`\x1b[33m~${info.unstaged}\x1b[0m`);
+  if (info.untracked) markers.push(`\x1b[31m?${info.untracked}\x1b[0m`);
+  if (info.ahead) markers.push(`\x1b[32m↑${info.ahead}\x1b[0m`);
+  if (info.behind) markers.push(`\x1b[31m↓${info.behind}\x1b[0m`);
+  const state = markers.length ? markers.join('') : '\x1b[32m✓\x1b[0m';
+  return ` │ \x1b[2m${info.branch}\x1b[0m${state}`;
+}
+
 // --- stdin ------------------------------------------------------------------
 
 function runStatusline() {
@@ -297,10 +425,15 @@ function runStatusline() {
   clearTimeout(stdinTimeout);
   try {
     const data = JSON.parse(input);
-    const model = data.model?.display_name || 'Claude';
+    const model = compactModelName(data.model?.display_name || 'Claude');
     const dir = data.workspace?.current_dir || process.cwd();
     const session = data.session_id || '';
     const remaining = data.context_window?.remaining_percentage;
+
+    // Read .planning config once — used by the context meter (token suffix)
+    // and the last-command/position block below. Fail-soft to {}.
+    let cfg = {};
+    try { cfg = readGsdConfig(dir); } catch (e) {}
 
     // Context window display (shows USED percentage scaled to usable context)
     // Claude Code reserves a buffer for autocompact. By default this is ~16.5%
@@ -310,7 +443,7 @@ function runStatusline() {
     const totalCtx = data.context_window?.total_tokens || 1_000_000;
     const acw = parseInt(process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || '0', 10);
     const AUTO_COMPACT_BUFFER_PCT = acw > 0
-      ? Math.min(100, (acw / totalCtx) * 100)
+      ? Math.min(100, Math.max(0, (1 - acw / totalCtx) * 100))
       : 16.5;
     let ctx = '';
     if (remaining != null) {
@@ -347,15 +480,21 @@ function runStatusline() {
       const filled = Math.floor(used / 10);
       const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
 
+      // Opt-in absolute token count after the percentage (statusline.show_context_tokens)
+      let tokenSuffix = '';
+      if (getConfigValue(cfg, 'statusline.show_context_tokens') === true) {
+        tokenSuffix = contextTokenSuffix(data.context_window?.current_usage);
+      }
+
       // Color based on usable context thresholds
       if (used < 50) {
-        ctx = ` \x1b[32m${bar} ${used}%\x1b[0m`;
+        ctx = ` \x1b[32m${bar} ${used}%${tokenSuffix}\x1b[0m`;
       } else if (used < 65) {
-        ctx = ` \x1b[33m${bar} ${used}%\x1b[0m`;
+        ctx = ` \x1b[33m${bar} ${used}%${tokenSuffix}\x1b[0m`;
       } else if (used < 80) {
-        ctx = ` \x1b[38;5;208m${bar} ${used}%\x1b[0m`;
+        ctx = ` \x1b[38;5;208m${bar} ${used}%${tokenSuffix}\x1b[0m`;
       } else {
-        ctx = ` \x1b[5;31m💀 ${bar} ${used}%\x1b[0m`;
+        ctx = ` \x1b[5;31m💀 ${bar} ${used}%${tokenSuffix}\x1b[0m`;
       }
     }
 
@@ -367,14 +506,20 @@ function runStatusline() {
     const todosDir = path.join(claudeDir, 'todos');
     if (session && fs.existsSync(todosDir)) {
       try {
-        const files = fs.readdirSync(todosDir)
-          .filter(f => f.startsWith(session) && f.includes('-agent-') && f.endsWith('.json'))
-          .map(f => ({ name: f, mtime: fs.statSync(path.join(todosDir, f)).mtime }))
-          .sort((a, b) => b.mtime - a.mtime);
+        // Single-pass max-by-mtime scan: only the newest matching todos file
+        // is needed, so the O(n log n) sort and the intermediate array from the
+        // prior `.filter().map(statSync).sort()` chain are unnecessary. Identical
+        // I/O (one statSync per match) and identical result. (#305)
+        let latest = null;
+        for (const entry of fs.readdirSync(todosDir)) {
+          if (!entry.startsWith(session) || !entry.includes('-agent-') || !entry.endsWith('.json')) continue;
+          const mtime = fs.statSync(path.join(todosDir, entry)).mtime;
+          if (!latest || mtime > latest.mtime) latest = { name: entry, mtime };
+        }
 
-        if (files.length > 0) {
+        if (latest) {
           try {
-            const todos = JSON.parse(fs.readFileSync(path.join(todosDir, files[0].name), 'utf8'));
+            const todos = JSON.parse(fs.readFileSync(path.join(todosDir, latest.name), 'utf8'));
             const inProgress = todos.find(t => t.status === 'in_progress');
             if (inProgress) task = inProgress.activeForm || '';
           } catch (e) {}
@@ -388,33 +533,22 @@ function runStatusline() {
     const gsdStateStr = task ? '' : formatGsdState(readGsdState(dir) || {});
 
     // GSD update available?
-    // Check shared cache first (#1421), fall back to runtime-specific cache for
-    // backward compatibility with older gsd-check-update.js versions.
+    // Read only the per-package shared cache file (#607). The legacy
+    // runtime-specific fallback has been removed — the per-package filename
+    // carries lineage and avoids multi-runtime resolution mismatches (#1421).
     let gsdUpdate = '';
-    const sharedCacheFile = path.join(homeDir, '.cache', 'gsd', 'gsd-update-check.json');
-    const legacyCacheFile = path.join(claudeDir, 'cache', 'gsd-update-check.json');
-    const cacheFile = fs.existsSync(sharedCacheFile) ? sharedCacheFile : legacyCacheFile;
+    const cacheFile = path.join(homeDir, '.cache', 'gsd', updateCacheFileName);
     if (fs.existsSync(cacheFile)) {
       try {
         const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-        if (cache.update_available) {
+        const { showUpdate, staleWarning } = evaluateUpdateCache(cache);
+        if (showUpdate) {
           gsdUpdate = '\x1b[33m⬆ /gsd:update\x1b[0m │ ';
         }
-        if (cache.stale_hooks && cache.stale_hooks.length > 0) {
-          // If installed version is ahead of npm latest, this is a dev install.
-          // Running /gsd:update would downgrade — show a contextual warning instead.
-          const isDevInstall = (() => {
-            if (!cache.installed || !cache.latest || cache.latest === 'unknown') return false;
-            const parseV = v => v.replace(/^v/, '').split('.').map(Number);
-            const [ai, bi, ci] = parseV(cache.installed);
-            const [an, bn, cn] = parseV(cache.latest);
-            return ai > an || (ai === an && bi > bn) || (ai === an && bi === bn && ci > cn);
-          })();
-          if (isDevInstall) {
-            gsdUpdate += '\x1b[33m⚠ dev install — re-run installer to sync hooks\x1b[0m │ ';
-          } else {
-            gsdUpdate += '\x1b[31m⚠ stale hooks — run /gsd:update\x1b[0m │ ';
-          }
+        if (staleWarning === 'dev') {
+          gsdUpdate += '\x1b[33m⚠ dev install — re-run installer to sync hooks\x1b[0m │ ';
+        } else if (staleWarning === 'stale') {
+          gsdUpdate += '\x1b[31m⚠ stale hooks — run /gsd:update\x1b[0m │ ';
         }
       } catch (e) {}
     }
@@ -424,8 +558,8 @@ function runStatusline() {
     // Failure here must never break the statusline — wrap the entire lookup.
     let lastCmdSuffix = '';
     let position = 'end';
+    let gitSuffix = '';
     try {
-      const cfg = readGsdConfig(dir);
       if (getConfigValue(cfg, 'statusline.show_last_command') === true) {
         const transcriptPath = data.transcript_path;
         const lastCmd = readLastSlashCommand(transcriptPath);
@@ -435,8 +569,11 @@ function runStatusline() {
       }
       const cfgPos = getConfigValue(cfg, 'statusline.context_position');
       if (cfgPos != null) position = cfgPos;
+      if (getConfigValue(cfg, 'statusline.show_git') === true) {
+        gitSuffix = buildGitSegment(parseGitStatus(readGitStatus(dir)));
+      }
     } catch (e) {
-      // Never break the statusline on config/transcript errors
+      // Never break the statusline on config/transcript/git errors
     }
 
     // Output
@@ -447,7 +584,7 @@ function runStatusline() {
         ? `\x1b[2m${gsdStateStr}\x1b[0m`
         : null;
 
-    process.stdout.write(composeStatusline({ gsdUpdate, model, ctx, middle, dirname, lastCmdSuffix, position }));
+    process.stdout.write(composeStatusline({ gsdUpdate, model, ctx, middle, dirname, lastCmdSuffix, gitSuffix, position }));
   } catch (e) {
     // Silent fail - don't break statusline on parse errors
   }
@@ -466,6 +603,7 @@ function runStatusline() {
  * @param {string|null} [opts.middle=null]  - middle segment (todo task or GSD state), null = absent
  * @param {string} opts.dirname             - project directory basename (dim styling applied here)
  * @param {string} [opts.lastCmdSuffix='']  - last-command suffix, e.g. ' │ last: /foo'
+ * @param {string} [opts.gitSuffix='']      - git branch/status segment, e.g. ' │ main✓' (after dirname)
  * @param {'end'|'front'} [opts.position='end']
  *   - 'end'   (default): ctx appended after dirname — preserved byte-for-byte
  *   - 'front': ctx immediately after model name so the meter stays visible in narrow terminals
@@ -481,6 +619,7 @@ function composeStatusline({
   middle = null,
   dirname,
   lastCmdSuffix = '',
+  gitSuffix = '',
   position = 'end',
 } = {}) {
   const modelSeg = `\x1b[2m${model}\x1b[0m`;
@@ -489,12 +628,42 @@ function composeStatusline({
   const pos = position === 'front' ? 'front' : 'end';
 
   if (pos === 'front') {
-    if (middle) return `${gsdUpdate}${modelSeg}${ctx} │ ${middle} │ ${dirSeg}${lastCmdSuffix}`;
-    return `${gsdUpdate}${modelSeg}${ctx} │ ${dirSeg}${lastCmdSuffix}`;
+    if (middle) return `${gsdUpdate}${modelSeg}${ctx} │ ${middle} │ ${dirSeg}${gitSuffix}${lastCmdSuffix}`;
+    return `${gsdUpdate}${modelSeg}${ctx} │ ${dirSeg}${gitSuffix}${lastCmdSuffix}`;
   }
   // 'end' — preserved byte-for-byte relative to original inline templates
-  if (middle) return `${gsdUpdate}${modelSeg} │ ${middle} │ ${dirSeg}${ctx}${lastCmdSuffix}`;
-  return `${gsdUpdate}${modelSeg} │ ${dirSeg}${ctx}${lastCmdSuffix}`;
+  if (middle) return `${gsdUpdate}${modelSeg} │ ${middle} │ ${dirSeg}${gitSuffix}${ctx}${lastCmdSuffix}`;
+  return `${gsdUpdate}${modelSeg} │ ${dirSeg}${gitSuffix}${ctx}${lastCmdSuffix}`;
+}
+
+function isInstalledAheadOfLatest(installed, latest) {
+  return isSemverNewer(installed, latest);
+}
+
+/**
+ * Pure function: evaluate an update-check cache object and return display flags.
+ * Applies lineage guard — if package_name is absent or foreign, treats cache as absent.
+ *
+ * @param {object|null} cache  Parsed cache object, or null.
+ * @returns {{ showUpdate: boolean, staleWarning: 'none'|'dev'|'stale' }}
+ */
+function evaluateUpdateCache(cache) {
+  const none = { showUpdate: false, staleWarning: 'none' };
+  if (!cache) return none;
+  // Lineage guard: package_name must be present and match this package.
+  if (!cache.package_name || cache.package_name !== PACKAGE_NAME) return none;
+  const showUpdate = Boolean(cache.update_available);
+  let staleWarning = 'none';
+  if (cache.stale_hooks && cache.stale_hooks.length > 0) {
+    const isDevInstall = (
+      cache.installed &&
+      cache.latest &&
+      cache.latest !== 'unknown' &&
+      isInstalledAheadOfLatest(cache.installed, cache.latest)
+    );
+    staleWarning = isDevInstall ? 'dev' : 'stale';
+  }
+  return { showUpdate, staleWarning };
 }
 
 // Export helpers for unit tests. Harmless when run as a script.
@@ -502,6 +671,12 @@ module.exports = {
   readGsdState, parseStateMd, formatGsdState,
   readGsdConfig, getConfigValue, readLastSlashCommand,
   composeStatusline,
+  isInstalledAheadOfLatest,
+  evaluateUpdateCache,
+  formatTokens,
+  contextTokenSuffix,
+  compactModelName,
+  readGitStatus, parseGitStatus, buildGitSegment,
 };
 
 /**
@@ -509,12 +684,13 @@ module.exports = {
  * testing without feeding stdin. Returns the rendered string.
  */
 function renderStatusline(data) {
-  const model = data.model?.display_name || 'Claude';
+  const model = compactModelName(data.model?.display_name || 'Claude');
   const dir = data.workspace?.current_dir || process.cwd();
   const dirname = path.basename(dir);
 
   let lastCmdSuffix = '';
   let position = 'end';
+  let gitSuffix = '';
   try {
     const cfg = readGsdConfig(dir);
     if (getConfigValue(cfg, 'statusline.show_last_command') === true) {
@@ -525,11 +701,14 @@ function renderStatusline(data) {
     }
     const cfgPos = getConfigValue(cfg, 'statusline.context_position');
     if (cfgPos != null) position = cfgPos;
+    if (getConfigValue(cfg, 'statusline.show_git') === true) {
+      gitSuffix = buildGitSegment(parseGitStatus(readGitStatus(dir)));
+    }
   } catch (e) { /* swallow */ }
 
   const gsdStateStr = formatGsdState(readGsdState(dir) || {});
   const middle = gsdStateStr ? `\x1b[2m${gsdStateStr}\x1b[0m` : null;
-  return composeStatusline({ model, ctx: '', middle, dirname, lastCmdSuffix, position });
+  return composeStatusline({ model, ctx: '', middle, dirname, lastCmdSuffix, gitSuffix, position });
 }
 
 module.exports.renderStatusline = renderStatusline;

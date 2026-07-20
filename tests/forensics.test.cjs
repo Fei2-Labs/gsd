@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * GSD Forensics Tests
@@ -15,10 +15,11 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { cleanup } = require('./helpers.cjs');
 
 const repoRoot = path.resolve(__dirname, '..');
 const commandPath = path.join(repoRoot, 'commands', 'gsd', 'forensics.md');
-const workflowPath = path.join(repoRoot, 'get-shit-done', 'workflows', 'forensics.md');
+const workflowPath = path.join(repoRoot, 'gsd-core', 'workflows', 'forensics.md');
 
 describe('forensics command', () => {
   test('command file exists', () => {
@@ -143,25 +144,25 @@ describe('forensics workflow', () => {
     );
   });
 
-  test('workflow submits issues to gsd-build/get-shit-done, not the current repo', () => {
+  test('workflow submits issues to open-gsd/gsd-core, not the current repo', () => {
     const content = fs.readFileSync(workflowPath, 'utf-8');
     // Scope check to the gh issue create invocation — a whole-file search would
     // pass even if gh issue create lacked --repo, because gh label list also
     // contains the repo string.
     assert.match(
       content,
-      /gh issue create[\s\S]{0,250}--repo\s+gsd-build\/get-shit-done/,
-      'gh issue create must use --repo gsd-build/get-shit-done to avoid submitting to the user\'s current project repo'
+      /gh issue create[\s\S]{0,250}--repo\s+open-gsd\/gsd-core/,
+      'gh issue create must use --repo open-gsd/gsd-core to avoid submitting to the user\'s current project repo'
     );
   });
 
-  test('workflow checks bug label in gsd-build/get-shit-done, not the current repo', () => {
+  test('workflow checks bug label in open-gsd/gsd-core, not the current repo', () => {
     const content = fs.readFileSync(workflowPath, 'utf-8');
     // Regex is more robust than a fixed-length slice to formatting changes
     assert.match(
       content,
-      /gh label list[\s\S]{0,250}--repo\s+gsd-build\/get-shit-done/,
-      'gh label list must target gsd-build/get-shit-done'
+      /gh label list[\s\S]{0,250}--repo\s+open-gsd\/gsd-core/,
+      'gh label list must target open-gsd/gsd-core'
     );
   });
 
@@ -220,7 +221,7 @@ describe('forensics fixture-based tests', () => {
   });
 
   afterEach(() => {
-    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup(tmpDir);
   });
 
   test('detects missing artifacts in phase structure', () => {

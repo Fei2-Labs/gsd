@@ -1,20 +1,20 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * Regression tests for bug #1991
  *
  * Cline is listed in GSD documentation as a supported runtime but was
- * completely absent from bin/install.js. Running `npx get-shit-done-cc`
+ * completely absent from bin/install.js. Running `npx @opengsd/gsd-core`
  * did not show Cline as an option in the interactive menu.
  *
  * Fixed: Cline is now a first-class runtime that:
  * - Appears in the interactive menu and --all flag
  * - Supports the --cline CLI flag
  * - Writes .clinerules to the install directory
- * - Installs get-shit-done/ engine with path replacement
+ * - Installs gsd-core/ engine with path replacement
  */
 
 'use strict';
@@ -30,20 +30,21 @@ const { createTempDir, cleanup } = require('./helpers.cjs');
 
 const {
   getDirName,
-  getGlobalDir,
   getConfigDirFromHome,
   convertClaudeToCliineMarkdown,
   install,
   finishInstall,
 } = require('../bin/install.js');
 
+const { getGlobalConfigDir } = require('../gsd-core/bin/lib/runtime-homes.cjs');
+
 describe('Cline runtime directory mapping', () => {
   test('getDirName returns .cline for local installs', () => {
     assert.strictEqual(getDirName('cline'), '.cline');
   });
 
-  test('getGlobalDir returns ~/.cline for global installs', () => {
-    assert.strictEqual(getGlobalDir('cline'), path.join(os.homedir(), '.cline'));
+  test('getGlobalConfigDir returns ~/.cline for global installs', () => {
+    assert.strictEqual(getGlobalConfigDir('cline'), path.join(os.homedir(), '.cline'));
   });
 
   test('getConfigDirFromHome returns .cline fragment', () => {
@@ -52,7 +53,7 @@ describe('Cline runtime directory mapping', () => {
   });
 });
 
-describe('getGlobalDir (Cline)', () => {
+describe('getGlobalConfigDir (Cline)', () => {
   let originalClineConfigDir;
 
   beforeEach(() => {
@@ -69,30 +70,30 @@ describe('getGlobalDir (Cline)', () => {
 
   test('returns ~/.cline with no env var or explicit dir', () => {
     delete process.env.CLINE_CONFIG_DIR;
-    const result = getGlobalDir('cline');
+    const result = getGlobalConfigDir('cline');
     assert.strictEqual(result, path.join(os.homedir(), '.cline'));
   });
 
   test('returns explicit dir when provided', () => {
-    const result = getGlobalDir('cline', '/custom/cline-path');
+    const result = getGlobalConfigDir('cline', '/custom/cline-path');
     assert.strictEqual(result, '/custom/cline-path');
   });
 
   test('respects CLINE_CONFIG_DIR env var', () => {
     process.env.CLINE_CONFIG_DIR = '~/custom-cline';
-    const result = getGlobalDir('cline');
+    const result = getGlobalConfigDir('cline');
     assert.strictEqual(result, path.join(os.homedir(), 'custom-cline'));
   });
 
   test('explicit dir takes priority over CLINE_CONFIG_DIR', () => {
     process.env.CLINE_CONFIG_DIR = '~/from-env';
-    const result = getGlobalDir('cline', '/explicit/path');
+    const result = getGlobalConfigDir('cline', '/explicit/path');
     assert.strictEqual(result, '/explicit/path');
   });
 
   test('does not break other runtimes', () => {
-    assert.strictEqual(getGlobalDir('claude'), path.join(os.homedir(), '.claude'));
-    assert.strictEqual(getGlobalDir('codex'), path.join(os.homedir(), '.codex'));
+    assert.strictEqual(getGlobalConfigDir('claude'), path.join(os.homedir(), '.claude'));
+    assert.strictEqual(getGlobalConfigDir('codex'), path.join(os.homedir(), '.codex'));
   });
 });
 
@@ -108,7 +109,7 @@ describe('Cline markdown conversion', () => {
   });
 
   test('replaces .claude/ paths with .cline/', () => {
-    const result = convertClaudeToCliineMarkdown('See ~/.claude/get-shit-done/');
+    const result = convertClaudeToCliineMarkdown('See ~/.claude/gsd-core/');
     assert.ok(!result.includes('.claude/'), `Expected no .claude/ in: ${result}`);
     assert.ok(result.includes('.cline/'));
   });
@@ -141,23 +142,25 @@ describe('Cline install (local)', () => {
     cleanup(tmpDir);
   });
 
-  test('install creates .clinerules file', () => {
+  test('install creates .clinerules directory with gsd.md (#787 directory form)', () => {
     install(false, 'cline');
-    const clinerules = path.join(tmpDir, '.clinerules');
-    assert.ok(fs.existsSync(clinerules), '.clinerules must exist after cline install');
+    const clinerulesDir = path.join(tmpDir, '.clinerules');
+    assert.ok(fs.existsSync(clinerulesDir), '.clinerules must exist after cline install');
+    assert.ok(fs.statSync(clinerulesDir).isDirectory(), '.clinerules must be a directory (#787)');
+    assert.ok(fs.existsSync(path.join(clinerulesDir, 'gsd.md')), '.clinerules/gsd.md must exist');
   });
 
-  test('.clinerules contains GSD instructions', () => {
+  test('.clinerules/gsd.md contains GSD instructions', () => {
     install(false, 'cline');
-    const clinerules = path.join(tmpDir, '.clinerules');
-    const content = fs.readFileSync(clinerules, 'utf8');
-    assert.ok(content.includes('GSD') || content.includes('gsd'), '.clinerules must reference GSD');
+    const ruleFile = path.join(tmpDir, '.clinerules', 'gsd.md');
+    const content = fs.readFileSync(ruleFile, 'utf8');
+    assert.ok(content.includes('GSD') || content.includes('gsd'), '.clinerules/gsd.md must reference GSD');
   });
 
-  test('install creates get-shit-done engine directory', () => {
+  test('install creates gsd-core engine directory', () => {
     install(false, 'cline');
-    const engineDir = path.join(tmpDir, 'get-shit-done');
-    assert.ok(fs.existsSync(engineDir), 'get-shit-done directory must exist after install');
+    const engineDir = path.join(tmpDir, 'gsd-core');
+    assert.ok(fs.existsSync(engineDir), 'gsd-core directory must exist after install');
   });
 
   test('finishInstall does not throw ERR_INVALID_ARG_TYPE for cline runtime (regression: null settingsPath guard)', () => {
@@ -179,7 +182,7 @@ describe('Cline install (local)', () => {
 
   test('installed engine files have no leaked .claude paths', () => {
     install(false, 'cline');
-    const engineDir = path.join(tmpDir, 'get-shit-done');
+    const engineDir = path.join(tmpDir, 'gsd-core');
     if (!fs.existsSync(engineDir)) return; // skip if engine not installed
 
     function scanDir(dir) {
@@ -191,11 +194,14 @@ describe('Cline install (local)', () => {
         } else if (entry.name.endsWith('.md') || entry.name.endsWith('.cjs') || entry.name.endsWith('.js')) {
           // CHANGELOG.md is a historical record and is not path-converted — skip it
           if (entry.name === 'CHANGELOG.md') continue;
+          // Converter source contains literal Claude source-path templates used before
+          // runtime-specific install rewrites; this test is only for deployed Cline payload leaks.
+          if (entry.name === 'runtime-artifact-conversion.cjs') continue;
           const content = fs.readFileSync(fullPath, 'utf8');
           // Check for GSD install paths that should have been substituted.
           // profile-pipeline.cjs intentionally references ~/.claude/projects (Claude Code
           // session data) as a runtime feature — that is not a leaked install path.
-          const hasLeaked = /~\/\.claude\/(?:get-shit-done|commands|agents|hooks)|HOME\/\.claude\/(?:get-shit-done|commands|agents|hooks)/.test(content);
+          const hasLeaked = /~\/\.claude\/(?:gsd-core|commands|agents|hooks)|HOME\/\.claude\/(?:gsd-core|commands|agents|hooks)/.test(content);
           assert.ok(!hasLeaked, `Found leaked GSD .claude install path in ${fullPath}`);
         }
       }

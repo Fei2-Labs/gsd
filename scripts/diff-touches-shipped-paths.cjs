@@ -12,11 +12,10 @@
  *   - package.json (always included by `npm pack`, regardless of `files`)
  *   - every entry in package.json `files`, treated as either an exact
  *     file match or a directory prefix (matching `npm pack` semantics).
- *   - CI-gating test paths: `tests/<anything>` plus
- *     `sdk/src/<anything>/<name>.test.<ts|cjs|mjs|js>` and `.spec.` variants
- *     — these don't ship in the tarball, but they gate the hotfix-branch
- *     test job. A test fixture update that aligns with a cherry-picked
- *     production fix MUST be pickable or CI fails on the hotfix run.
+ *   - CI-gating test paths: `tests/<anything>` — these don't ship in the
+ *     tarball, but they gate the hotfix-branch test job. A test fixture
+ *     update that aligns with a cherry-picked production fix MUST be
+ *     pickable or CI fails on the hotfix run.
  *     #3621 — root cause of the v1.42.3 hotfix red CI.
  *
  * `package-lock.json` is intentionally NOT considered shipped — `npm pack`
@@ -43,6 +42,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { ExitError, runMain } = require('./lib/cli-exit.cjs');
 
 const EXIT_SHIPPED = 0;
 const EXIT_NOT_SHIPPED = 1;
@@ -61,15 +61,10 @@ function loadShipPrefixes(pkgPath) {
 // hotfix run (exactly what happened on v1.42.3 — production fix(3562) was
 // picked, the bundled test-fixture correction in commit 08848df8 was not).
 // Combined with the `test:` prefix being added to the candidate-loop regex
-// in release-sdk.yml, this lets `test(####):` fixture-alignment commits be
+// in hotfix.yml, this lets `test(####):` fixture-alignment commits be
 // cherry-picked alongside their production counterparts.
 function isCiGating(diffPath) {
-  if (diffPath.startsWith('tests/')) return true;
-  // SDK vitest specs live next to source. Production source ships via
-  // sdk/dist/ (already in package.json `files`); the test files are what's
-  // missing from that surface.
-  if (diffPath.startsWith('sdk/src/') && /\.(test|spec)\.(ts|cjs|mjs|js)$/.test(diffPath)) return true;
-  return false;
+  return diffPath.startsWith('tests/');
 }
 
 function isShipped(diffPath, shipPrefixes) {
@@ -88,60 +83,67 @@ function isPushBlocking(diffPath) {
   return diffPath.replace(/\\/g, '/').startsWith('.github/workflows/');
 }
 
-function fail(message, err) {
-  process.stderr.write(`diff-touches-shipped-paths: ${message}\n`);
-  if (err && err.stack) process.stderr.write(`${err.stack}\n`);
-  process.exit(EXIT_ERROR);
+function readStdin() {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => { data += chunk; });
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
+  });
 }
 
-function main() {
-  // Surface ANY uncaught failure as exit 2 (classifier error) rather
-  // than letting Node's default-1 shadow the legitimate
-  // "no shipped paths" result. Bug #2983.
-  process.on('uncaughtException', (err) => fail('uncaught exception', err));
-  process.on('unhandledRejection', (err) => fail('unhandled rejection', err));
-
-  let shipPrefixes;
+async function main() {
   try {
-    const pkgPath = path.resolve(process.cwd(), 'package.json');
-    shipPrefixes = loadShipPrefixes(pkgPath);
-  } catch (err) {
-    return fail(`failed to read package.json from ${process.cwd()}`, err);
-  }
-
-  let buf = '';
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('error', (err) => fail('stdin read error', err));
-  process.stdin.on('data', (chunk) => {
-    buf += chunk;
-  });
-  process.stdin.on('end', () => {
+    let shipPrefixes;
     try {
-      const paths = buf.split('\n').map((s) => s.trim()).filter(Boolean);
-      // #2980 still wins over #3621: any commit touching .github/workflows/*
-      // is unpickable regardless of other content because the push step
-      // fails on workflow scope rejection. Check this first.
-      if (paths.some(isPushBlocking)) {
-        process.exit(EXIT_NOT_SHIPPED);
-      }
-      if (paths.some((p) => isShipped(p, shipPrefixes))) {
-        process.exit(EXIT_SHIPPED);
-      }
-      // #3621: a commit whose only relevant paths are CI-gating tests is
-      // still pickable — it can change whether the hotfix CI passes even
-      // though it doesn't change what the npm tarball ships.
-      if (paths.some(isCiGating)) {
-        process.exit(EXIT_SHIPPED);
-      }
-      process.exit(EXIT_NOT_SHIPPED);
+      const pkgPath = path.resolve(process.cwd(), 'package.json');
+      shipPrefixes = loadShipPrefixes(pkgPath);
     } catch (err) {
-      fail('classification failed', err);
+      process.stderr.write(`diff-touches-shipped-paths: failed to read package.json from ${process.cwd()}\n`);
+      if (err && err.stack) process.stderr.write(`${err.stack}\n`);
+      throw new ExitError(EXIT_ERROR);
     }
-  });
+
+    let buf;
+    try {
+      buf = await readStdin();
+    } catch (err) {
+      process.stderr.write(`diff-touches-shipped-paths: stdin read error\n`);
+      if (err && err.stack) process.stderr.write(`${err.stack}\n`);
+      throw new ExitError(EXIT_ERROR);
+    }
+
+    const paths = buf.split('\n').map((s) => s.trim()).filter(Boolean);
+    // #2980 still wins over #3621: any commit touching .github/workflows/*
+    // is unpickable regardless of other content because the push step
+    // fails on workflow scope rejection. Check this first.
+    if (paths.some(isPushBlocking)) {
+      return EXIT_NOT_SHIPPED;
+    }
+    if (paths.some((p) => isShipped(p, shipPrefixes))) {
+      return EXIT_SHIPPED;
+    }
+    // #3621: a commit whose only relevant paths are CI-gating tests is
+    // still pickable — it can change whether the hotfix CI passes even
+    // though it doesn't change what the npm tarball ships.
+    if (paths.some(isCiGating)) {
+      return EXIT_SHIPPED;
+    }
+    return EXIT_NOT_SHIPPED;
+  } catch (e) {
+    // Re-throw ExitError unchanged; map any unexpected error to EXIT_ERROR=2
+    // (Node's default uncaught-exception code is 1, which is indistinguishable
+    // from the legitimate EXIT_NOT_SHIPPED result — bug #2983).
+    if (e instanceof ExitError) throw e;
+    process.stderr.write(`diff-touches-shipped-paths: classification failed\n`);
+    if (e && e.stack) process.stderr.write(`${e.stack}\n`);
+    throw new ExitError(EXIT_ERROR);
+  }
 }
 
 if (require.main === module) {
-  main();
+  runMain(main);
 }
 
 module.exports = { loadShipPrefixes, isShipped, isCiGating, isPushBlocking, EXIT_SHIPPED, EXIT_NOT_SHIPPED, EXIT_ERROR };

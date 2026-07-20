@@ -1,6 +1,6 @@
 # Render agent definitions from templates at install/config-change time
 
-**Source:** [#2758](https://github.com/gsd-build/get-shit-done/issues/2758)
+**Source:** [#2758](https://github.com/open-gsd/gsd-core/issues/2758)
 **Decision:** wontfix — closed on the technical merits
 **Date:** 2026-05-02
 
@@ -100,5 +100,5 @@ This may be revisited if a contributor:
   precedent for deterministic compile-time embedding into agent files)
 - v1.37.0 release notes — shared-boilerplate extraction (reference files for
   mandatory-initial-read, project-skills-discovery)
-- `get-shit-done/workflows/` — workflow-level config embedding before subagent
+- `gsd-core/workflows/` — workflow-level config embedding before subagent
   spawn (the path of least friction for incremental deterministic gating)

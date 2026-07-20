@@ -32,18 +32,14 @@ const { createTempProject, cleanup, runGsdTools } = require('./helpers.cjs');
 const {
   VALID_CONFIG_KEYS,
   isValidConfigKey,
-} = require('../get-shit-done/bin/lib/config-schema.cjs');
+} = require('../gsd-core/bin/lib/config-schema.cjs');
 
 const REPO_ROOT = path.join(__dirname, '..');
 // #2790: settings-integrations.md was consolidated into config.md as the --integrations flag.
 const COMMAND_PATH = path.join(REPO_ROOT, 'commands', 'gsd', 'config.md');
-const WORKFLOW_PATH = path.join(REPO_ROOT, 'get-shit-done', 'workflows', 'settings-integrations.md');
+const WORKFLOW_PATH = path.join(REPO_ROOT, 'gsd-core', 'workflows', 'settings-integrations.md');
 const SKILL_PATH = path.join(REPO_ROOT, '.claude', 'skills', 'gsd-settings-integrations.md');
-const SETTINGS_WORKFLOW_PATH = path.join(REPO_ROOT, 'get-shit-done', 'workflows', 'settings.md');
-
-function readIfExists(p) {
-  try { return fs.readFileSync(p, 'utf-8'); } catch { return null; }
-}
+const SETTINGS_WORKFLOW_PATH = path.join(REPO_ROOT, 'gsd-core', 'workflows', 'settings.md');
 
 // ─── Artifacts ───────────────────────────────────────────────────────────────
 
@@ -62,7 +58,7 @@ describe('#2529 artifacts', () => {
     assert.match(src, /AskUserQuestion/);
   });
 
-  test('workflow exists at get-shit-done/workflows/settings-integrations.md', () => {
+  test('workflow exists at gsd-core/workflows/settings-integrations.md', () => {
     assert.ok(fs.existsSync(WORKFLOW_PATH), `missing ${WORKFLOW_PATH}`);
   });
 

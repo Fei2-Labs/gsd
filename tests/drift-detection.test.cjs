@@ -28,7 +28,7 @@ const {
 const DRIFT_PATH = path.join(
   __dirname,
   '..',
-  'get-shit-done',
+  'gsd-core',
   'bin',
   'lib',
   'drift.cjs',
@@ -36,7 +36,7 @@ const DRIFT_PATH = path.join(
 const CONFIG_SCHEMA_PATH = path.join(
   __dirname,
   '..',
-  'get-shit-done',
+  'gsd-core',
   'bin',
   'lib',
   'config-schema.cjs',
@@ -469,17 +469,44 @@ describe('detectDrift — non-blocking guarantee', () => {
   });
 });
 
-// ─── Config validation: new keys present and restricted ──────────────────────
+// ─── Config validation: drift keys owned by the drift capability ──────────────
+//
+// After ADR-857 phase-6 migration, workflow.drift_threshold and workflow.drift_action
+// are no longer in the central config schema manifest (VALID_CONFIG_KEYS). They are
+// federated config keys owned exclusively by the `drift` capability in the registry.
+// VALID_CONFIG_KEYS covers central-only keys; capability-owned keys resolve through
+// the federated config overlay (loadConfig still returns them at their defaults).
+
+const CAPABILITY_REGISTRY_PATH = path.join(
+  __dirname,
+  '..',
+  'gsd-core',
+  'bin',
+  'lib',
+  'capability-registry.cjs',
+);
 
 describe('config-schema — drift keys', () => {
-  test('workflow.drift_threshold in VALID_CONFIG_KEYS', () => {
-    const { VALID_CONFIG_KEYS } = require(CONFIG_SCHEMA_PATH);
-    assert.ok(VALID_CONFIG_KEYS.has('workflow.drift_threshold'));
+  test('workflow.drift_threshold owned by drift capability (not central)', () => {
+    const { isCentralConfigKey } = require(CONFIG_SCHEMA_PATH);
+    const registry = require(CAPABILITY_REGISTRY_PATH);
+    // Must be owned by the drift capability
+    assert.strictEqual(registry.configKeys['workflow.drift_threshold'], 'drift',
+      'workflow.drift_threshold must be owned by the drift capability');
+    // Must NOT be in central schema (migration complete)
+    assert.strictEqual(isCentralConfigKey('workflow.drift_threshold'), false,
+      'workflow.drift_threshold must not be a central config key after capability migration');
   });
 
-  test('workflow.drift_action in VALID_CONFIG_KEYS', () => {
-    const { VALID_CONFIG_KEYS } = require(CONFIG_SCHEMA_PATH);
-    assert.ok(VALID_CONFIG_KEYS.has('workflow.drift_action'));
+  test('workflow.drift_action owned by drift capability (not central)', () => {
+    const { isCentralConfigKey } = require(CONFIG_SCHEMA_PATH);
+    const registry = require(CAPABILITY_REGISTRY_PATH);
+    // Must be owned by the drift capability
+    assert.strictEqual(registry.configKeys['workflow.drift_action'], 'drift',
+      'workflow.drift_action must be owned by the drift capability');
+    // Must NOT be in central schema (migration complete)
+    assert.strictEqual(isCentralConfigKey('workflow.drift_action'), false,
+      'workflow.drift_action must not be a central config key after capability migration');
   });
 });
 
@@ -560,7 +587,7 @@ describe('gsd-codebase-mapper --paths flag', () => {
       path.join(
         __dirname,
         '..',
-        'get-shit-done',
+        'gsd-core',
         'workflows',
         'map-codebase.md',
       ),
@@ -571,20 +598,48 @@ describe('gsd-codebase-mapper --paths flag', () => {
 });
 
 // ─── Execute-phase workflow integration ──────────────────────────────────────
+//
+// After ADR-857 phase-6 migration, codebase_drift_gate is no longer an inline
+// step in execute-phase.md. Instead, it is declared as a gate in the `drift`
+// capability at the `execute:wave:post` hook point. The execute-phase.md
+// dispatches capability gates via `gsd_run loop render-hooks execute:wave:post`,
+// which fires the drift gates automatically.
 
 describe('execute-phase integrates codebase_drift_gate', () => {
   test('workflow references a codebase drift step', () => {
+    // After capability migration: the drift gate fires via execute:wave:post
+    // render-hooks dispatch. Verify two things:
+    // 1. execute-phase.md has the execute:wave:post render-hooks call site.
+    // 2. The drift capability declares a codebase-drift gate at execute:wave:post.
     const doc = fs.readFileSync(
       path.join(
         __dirname,
         '..',
-        'get-shit-done',
+        'gsd-core',
         'workflows',
         'execute-phase.md',
       ),
       'utf8',
     );
-    assert.ok(/codebase_drift_gate|codebase-drift/.test(doc));
+    // execute-phase.md must dispatch execute:wave:post hooks (the call site that fires drift gates)
+    assert.ok(
+      /loop render-hooks execute:wave:post/.test(doc),
+      'execute-phase.md must dispatch execute:wave:post hooks (drift capability gate call site)',
+    );
+    // The drift capability must declare a codebase-drift gate at execute:wave:post
+    const registry = require(CAPABILITY_REGISTRY_PATH);
+    const driftCap = registry.capabilities['drift'];
+    assert.ok(driftCap, 'drift capability must be registered');
+    const codebaseDriftGate = (driftCap.gates || []).find(
+      (g) => g.check && /codebase.drift/i.test(g.check.query),
+    );
+    assert.ok(
+      codebaseDriftGate,
+      'drift capability must declare a codebase-drift gate at execute:wave:post',
+    );
+    assert.strictEqual(codebaseDriftGate.point, 'execute:wave:post');
+    assert.strictEqual(codebaseDriftGate.blocking, false,
+      'codebase-drift gate must be non-blocking by contract');
   });
 
   test('workflow documents non-blocking guarantee for drift', () => {
@@ -592,7 +647,7 @@ describe('execute-phase integrates codebase_drift_gate', () => {
       path.join(
         __dirname,
         '..',
-        'get-shit-done',
+        'gsd-core',
         'workflows',
         'execute-phase.md',
       ),
@@ -665,3 +720,228 @@ describe('verify codebase-drift CLI', () => {
     }
   });
 });
+
+// ─── Regression #1493 — workflow.drift_action / drift_threshold read from nested config shape ───
+//
+// loadConfig() returns a flattened object; config?.workflow was always undefined,
+// making drift_action permanently 'warn' and drift_threshold always 3 regardless
+// of .planning/config.json contents. Fix reads the raw nested JSON directly.
+
+describe('verify codebase-drift — workflow config read from nested shape (#1493)', () => {
+  let tmp;
+  beforeEach(() => {
+    tmp = createTempGitProject('gsd-drift-1493-');
+    fs.mkdirSync(path.join(tmp, '.planning', 'codebase'), { recursive: true });
+  });
+  afterEach(() => cleanup(tmp));
+
+  test('workflow.drift_action=auto-remap in config.json is honored (not always warn) (#1493)', () => {
+    // Write config with nested workflow shape — the flat loadConfig() path would
+    // have silently dropped this, leaving action === 'warn'.
+    fs.writeFileSync(
+      path.join(tmp, '.planning', 'config.json'),
+      JSON.stringify({ workflow: { drift_action: 'auto-remap', drift_threshold: 1 } }, null, 2),
+    );
+
+    // Map codebase to current HEAD so anything committed next is "new" drift.
+    const structure = path.join(tmp, '.planning', 'codebase', 'STRUCTURE.md');
+    fs.writeFileSync(structure, '# Codebase Structure\n\n- `src/`\n');
+    writeMappedCommit(structure, git(tmp, 'rev-parse', 'HEAD'), '2026-04-22');
+    git(tmp, 'add', '-A');
+    git(tmp, 'commit', '-m', 'map codebase');
+
+    // Add one structural barrel file — enough to exceed drift_threshold of 1.
+    const dir = path.join(tmp, 'packages', 'ui', 'src');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'index.ts'), 'export {};\n');
+    git(tmp, 'add', '-A');
+    git(tmp, 'commit', '-m', 'add package barrel');
+
+    const r = runGsdTools(['verify', 'codebase-drift'], tmp);
+    assert.strictEqual(r.success, true, r.error);
+    const data = JSON.parse(r.output);
+    assert.strictEqual(
+      data.action, 'auto-remap',
+      'workflow.drift_action=auto-remap must flow through from nested config; "warn" means the flat-shape bug is still active',
+    );
+  });
+
+  test('workflow.drift_threshold in config.json gates triggering (#1493)', () => {
+    // Threshold of 100 — 1 structural file should not trigger action_required.
+    fs.writeFileSync(
+      path.join(tmp, '.planning', 'config.json'),
+      JSON.stringify({ workflow: { drift_action: 'auto-remap', drift_threshold: 100 } }, null, 2),
+    );
+
+    const structure = path.join(tmp, '.planning', 'codebase', 'STRUCTURE.md');
+    fs.writeFileSync(structure, '# Codebase Structure\n\n- `src/`\n');
+    writeMappedCommit(structure, git(tmp, 'rev-parse', 'HEAD'), '2026-04-22');
+    git(tmp, 'add', '-A');
+    git(tmp, 'commit', '-m', 'map codebase');
+
+    const dir = path.join(tmp, 'packages', 'ui', 'src');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'index.ts'), 'export {};\n');
+    git(tmp, 'add', '-A');
+    git(tmp, 'commit', '-m', 'add one package barrel');
+
+    const r = runGsdTools(['verify', 'codebase-drift'], tmp);
+    assert.strictEqual(r.success, true, r.error);
+    const data = JSON.parse(r.output);
+    assert.strictEqual(data.threshold, 100,
+      'workflow.drift_threshold=100 must be read from nested config; 3 means the flat-shape bug is still active');
+    assert.strictEqual(data.action_required, false,
+      '1 structural file must not exceed threshold of 100');
+  });
+});
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Folded from tests/bug-619-codebase-drift-gate-shim.test.cjs — consolidation epic #1969 (B6 #1975)
+// ────────────────────────────────────────────────────────────────────────
+{
+  const { describe: __foldDescribe } = require('node:test');
+  __foldDescribe("folded:bug-619-codebase-drift-gate-shim (consolidation epic #1969 B6 #1975)", () => {
+// allow-test-rule: source-text-is-the-product (see #619)
+// codebase-drift-gate.md is the shipped orchestration step contract. Bug #619:
+// the initial drift check ran the bare PATH binary `gsd-tools verify codebase-drift`.
+// On a shim-only install (gsd-tools.cjs present, `gsd-tools` not on PATH) that exits
+// 127, `2>/dev/null` hides it, and the `|| echo` fallback marks the gate skipped —
+// so post-execution drift detection silently never runs. The fix resolves gsd-tools
+// through the runtime shim launcher (gsd_run), defining the canonical preamble once in
+// this always-run block so the file stays compliant with the single-preamble parity
+// invariant (the conditional auto-remap block reuses the launcher via shared shell scope).
+//
+// This file locks the source contract AND behaviorally proves the shim resolves: it runs
+// the exact shipped drift-check block against a shim-only topology and asserts the shim
+// actually executes, where the old bare-binary form would have skipped.
+
+'use strict';
+
+const { test, describe } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const { cleanup } = require('./helpers.cjs');
+
+const GATE_MD = path.join(
+  __dirname, '..', 'gsd-core', 'workflows', 'execute-phase', 'steps', 'codebase-drift-gate.md',
+);
+const SNIPPET_FILE = path.join(__dirname, '..', 'gsd-core', 'workflows', '_runtime-launcher.snippet.sh');
+
+function readGate() {
+  return fs.readFileSync(GATE_MD, 'utf8');
+}
+
+// Extract the Nth (0-based) ```bash fenced block body from the file.
+function bashBlock(content, n) {
+  const blocks = [];
+  const re = /```bash\r?\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(content)) !== null) blocks.push(m[1]);
+  assert.ok(blocks.length > n, `expected at least ${n + 1} bash blocks, found ${blocks.length}`);
+  return blocks[n];
+}
+
+describe('bug #619 — codebase-drift-gate resolves gsd-tools via the runtime shim, not the bare PATH binary', () => {
+  test('codebase-drift-gate.md is readable', () => {
+    assert.ok(readGate().length > 0, 'codebase-drift-gate.md must not be empty');
+  });
+
+  // ── Source contract (the .md is the product) ──────────────────────────────
+
+  test('the drift check resolves gsd-tools via the shim launcher (gsd_run), not the bare binary (#619)', () => {
+    const content = readGate();
+    assert.match(
+      content,
+      /DRIFT=\$\(gsd_run verify codebase-drift 2>\/dev\/null \|\| echo '\{"skipped":true,"reason":"sdk-failed"\}'\)/,
+      'drift check must call `gsd_run verify codebase-drift` with the non-blocking skip fallback',
+    );
+    assert.doesNotMatch(
+      content,
+      /\bgsd-tools verify codebase-drift\b/,
+      'the bare `gsd-tools verify codebase-drift` PATH-binary call (the #619 bug) must be gone',
+    );
+  });
+
+  test('non-blocking contract preserved: the skip JSON fallback is intact (#619)', () => {
+    const content = readGate();
+    assert.match(
+      content,
+      /\|\| echo '\{"skipped":true,"reason":"sdk-failed"\}'/,
+      'an internal drift-command failure must still fall through to the skip JSON',
+    );
+  });
+
+  test('exactly one canonical launcher preamble, in the drift-check block, before any launcher call (#619)', () => {
+    const content = readGate();
+    const snippet = fs.readFileSync(SNIPPET_FILE, 'utf8').replace(/\r?\n$/, '');
+
+    // Count canonical preamble occurrences across the whole file (parity: exactly one).
+    let count = 0;
+    let pos = 0;
+    for (;;) {
+      const idx = content.indexOf(snippet, pos);
+      if (idx === -1) break;
+      count++;
+      pos = idx + snippet.length;
+    }
+    assert.equal(count, 1, `expected exactly one canonical preamble; found ${count}`);
+
+    // The preamble must live in the first (drift-check) bash block, before the DRIFT call.
+    const block0 = bashBlock(content, 0);
+    assert.ok(block0.includes(snippet), 'the canonical preamble must be in the drift-check block');
+    assert.ok(
+      block0.indexOf(snippet) < block0.indexOf('gsd_run verify codebase-drift'),
+      'the preamble must precede the gsd_run drift call in the same block',
+    );
+
+    // The auto-remap block reuses gsd_run but must NOT carry its own preamble.
+    const content2 = content.slice(content.indexOf('AGENT_SKILLS_MAPPER'));
+    assert.ok(!content2.includes(snippet), 'the auto-remap block must not re-declare the preamble (single-preamble parity)');
+  });
+
+  // ── Behavioral proof: the shim resolves on a shim-only topology ───────────
+
+  test('shipped drift-check block runs the shim (gsd-tools.cjs), not skip, on a shim-only install (#619)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-619-'));
+    try {
+      // Shim-only topology: gsd-tools.cjs present under RUNTIME_DIR; no `gsd-tools` on PATH.
+      const binDir = path.join(tmp, 'gsd-core', 'bin');
+      fs.mkdirSync(binDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(binDir, 'gsd-tools.cjs'),
+        'if (process.argv[2] === "verify" && process.argv[3] === "codebase-drift") {\n' +
+        '  process.stdout.write(JSON.stringify({ action_required: false, sentinel: "SHIM_RAN" }));\n' +
+        '}\n',
+      );
+
+      const block = bashBlock(readGate(), 0) + '\nprintf "%s" "$DRIFT"\n';
+      const out = execFileSync('bash', ['-c', block], {
+        env: { ...process.env, RUNTIME_DIR: tmp },
+        encoding: 'utf8',
+      });
+
+      assert.match(out, /SHIM_RAN/, 'the drift check must execute the resolved shim, proving gsd_run resolution');
+      assert.doesNotMatch(out, /sdk-failed/, 'the gate must NOT silently skip when the shim is present (#619)');
+    } finally {
+      cleanup(tmp);
+    }
+  });
+
+  test('red-proof: the old bare `gsd-tools` form would skip when gsd-tools is not on PATH', () => {
+    // Documents the #619 bug: the pre-fix bare-binary call, with no `gsd-tools` on PATH,
+    // hits the 127 → `|| echo` skip path even though the shim (gsd-tools.cjs) exists.
+    const oldForm =
+      'DRIFT=$(gsd-tools verify codebase-drift 2>/dev/null || echo \'{"skipped":true,"reason":"sdk-failed"}\'); printf "%s" "$DRIFT"';
+    const out = execFileSync('bash', ['-c', 'export PATH=/nonexistent-empty-path; ' + oldForm], {
+      env: { ...process.env },
+      encoding: 'utf8',
+    });
+    assert.match(out, /sdk-failed/, 'sanity: the bare-binary form skips without gsd-tools on PATH — the bug the fix removes');
+  });
+});
+  });
+}

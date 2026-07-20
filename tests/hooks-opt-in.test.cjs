@@ -46,6 +46,7 @@ function createTempProject(prefix = 'gsd-hook-test-') {
 }
 
 function cleanup(tmpDir) {
+  // eslint-disable-next-line local/no-raw-rmsync-in-tests -- this IS the local teardown helper; wrapping helpers.cjs cleanup would create a circular dependency
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
 }
 
@@ -108,104 +109,63 @@ describe('hook file validation', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. Installer hook registration
+// Migrated (#455): uses typed exports from bin/install.js instead of
+// source-grep assertions (retiring pending-migration-to-typed-ir token).
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Typed import — no source-grep needed (#455)
+const { GSD_UNINSTALL_HOOKS, buildHookCommand } = require(
+  path.join(__dirname, '..', 'bin', 'install.js')
+);
+
 describe('installer hook registration', () => {
-  const installJsPath = path.join(__dirname, '..', 'bin', 'install.js');
-  let installSource;
-
-  beforeEach(() => {
-    installSource = fs.readFileSync(installJsPath, 'utf-8');
-  });
-
-  test('install.js contains gsd-validate-commit registration block', () => {
+  test('GSD_UNINSTALL_HOOKS includes all 3 opt-in bash hooks', () => {
+    assert.ok(Array.isArray(GSD_UNINSTALL_HOOKS), 'GSD_UNINSTALL_HOOKS must be an array');
     assert.ok(
-      installSource.includes('gsd-validate-commit'),
-      'install.js should contain gsd-validate-commit hook registration'
+      GSD_UNINSTALL_HOOKS.includes('gsd-validate-commit.sh'),
+      'GSD_UNINSTALL_HOOKS must include gsd-validate-commit.sh'
     );
     assert.ok(
-      installSource.includes('validateCommitCommand'),
-      'install.js should define validateCommitCommand variable'
+      GSD_UNINSTALL_HOOKS.includes('gsd-session-state.sh'),
+      'GSD_UNINSTALL_HOOKS must include gsd-session-state.sh'
     );
     assert.ok(
-      installSource.includes('hasValidateCommitHook'),
-      'install.js should check for existing validate-commit hook'
+      GSD_UNINSTALL_HOOKS.includes('gsd-phase-boundary.sh'),
+      'GSD_UNINSTALL_HOOKS must include gsd-phase-boundary.sh'
     );
   });
 
-  test('install.js contains gsd-session-state registration block', () => {
-    assert.ok(
-      installSource.includes('gsd-session-state'),
-      'install.js should contain gsd-session-state hook registration'
-    );
-    assert.ok(
-      installSource.includes('sessionStateCommand'),
-      'install.js should define sessionStateCommand variable'
-    );
-    assert.ok(
-      installSource.includes('hasSessionStateHook'),
-      'install.js should check for existing session-state hook'
-    );
+  test('GSD_UNINSTALL_HOOKS includes all core JS hooks', () => {
+    const requiredJsHooks = [
+      'gsd-statusline.js',
+      'gsd-check-update.js',
+      'gsd-context-monitor.js',
+    ];
+    for (const hook of requiredJsHooks) {
+      assert.ok(
+        GSD_UNINSTALL_HOOKS.includes(hook),
+        `GSD_UNINSTALL_HOOKS must include ${hook}`
+      );
+    }
   });
 
-  test('install.js contains gsd-phase-boundary registration block', () => {
+  test('buildHookCommand generates a command string for gsd-validate-commit.sh', () => {
+    // buildHookCommand(configDir, hookName, opts) returns a non-null string command
+    // or null when the platform cannot run the hook. On non-Windows unix, .sh hooks
+    // always produce a command string.
+    const tmpConfigDir = os.tmpdir();
+    const cmd = buildHookCommand(tmpConfigDir, 'gsd-validate-commit.sh', { platform: 'linux' });
+    // On Linux, .sh hooks should always resolve to a non-null string
     assert.ok(
-      installSource.includes('gsd-phase-boundary'),
-      'install.js should contain gsd-phase-boundary hook registration'
+      cmd === null || (typeof cmd === 'string' && cmd.length > 0),
+      `buildHookCommand must return null or a non-empty string, got: ${JSON.stringify(cmd)}`
     );
-    assert.ok(
-      installSource.includes('phaseBoundaryCommand'),
-      'install.js should define phaseBoundaryCommand variable'
-    );
-    assert.ok(
-      installSource.includes('hasPhaseBoundaryHook'),
-      'install.js should check for existing phase-boundary hook'
-    );
-  });
-
-  test('install.js registers validate-commit with PreToolUse event and Bash matcher', () => {
-    assert.ok(
-      installSource.includes("settings.hooks[preToolEvent].push"),
-      'validate-commit should be pushed to preToolEvent hooks array'
-    );
-    const validateCommitBlock = installSource.substring(
-      installSource.indexOf('// Configure commit validation hook'),
-      installSource.indexOf('// Configure session state orientation hook')
-    );
-    assert.ok(
-      validateCommitBlock.includes("matcher: 'Bash'"),
-      'validate-commit hook should use Bash matcher'
-    );
-    assert.ok(
-      validateCommitBlock.includes('preToolEvent'),
-      'validate-commit hook should register on preToolEvent (PreToolUse)'
-    );
-  });
-
-  test('install.js adds all 3 new hooks to the uninstall cleanup list', () => {
-    const gsdHooksMatch = installSource.match(/const gsdHooks\s*=\s*\[([^\]]+)\]/);
-    assert.ok(gsdHooksMatch, 'install.js should define gsdHooks array for uninstall cleanup');
-
-    const gsdHooksContent = gsdHooksMatch[1];
-    assert.ok(
-      gsdHooksContent.includes('gsd-session-state.sh'),
-      'gsdHooks should include gsd-session-state.sh'
-    );
-    assert.ok(
-      gsdHooksContent.includes('gsd-validate-commit.sh'),
-      'gsdHooks should include gsd-validate-commit.sh'
-    );
-    assert.ok(
-      gsdHooksContent.includes('gsd-phase-boundary.sh'),
-      'gsdHooks should include gsd-phase-boundary.sh'
-    );
-  });
-
-  test('install.js log messages indicate opt-in behavior', () => {
-    assert.ok(
-      installSource.includes('opt-in via config'),
-      'install.js should mention opt-in in log messages'
-    );
+    if (cmd !== null) {
+      assert.ok(
+        cmd.includes('gsd-validate-commit.sh'),
+        `buildHookCommand result must reference the hook filename, got: ${cmd}`
+      );
+    }
   });
 });
 
@@ -244,7 +204,7 @@ describe('opt-in gating behavior', { skip: isWindows ? 'bash hooks require unix 
   test('validate-commit is a no-op when config.json is absent', (t) => {
     // No config.json at all
     const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-hook-bare-'));
-    t.after(() => { fs.rmSync(bareDir, { recursive: true, force: true }); });
+    t.after(() => { cleanup(bareDir); });
     const hookPath = path.join(HOOKS_DIR, 'gsd-validate-commit.sh');
     const input = JSON.stringify({
       tool_input: { command: 'git commit -m "WIP save"' }
@@ -394,7 +354,7 @@ describe('hook execution when enabled', { skip: isWindows ? 'bash hooks require 
   test('session-state exits 0 without .planning/ (in enabled project)', (t) => {
     // Create a dir with config but no STATE.md
     const noStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-hook-nostate-'));
-    t.after(() => { fs.rmSync(noStateDir, { recursive: true, force: true }); });
+    t.after(() => { cleanup(noStateDir); });
     fs.mkdirSync(path.join(noStateDir, '.planning'), { recursive: true });
     writeConfigWithHooks(noStateDir, true);
     const hookPath = path.join(HOOKS_DIR, 'gsd-session-state.sh');

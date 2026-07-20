@@ -1,0 +1,19 @@
+{
+  "name": "tag-immutability",
+  "target": "tag",
+  "enforcement": "disabled",
+  "conditions": {
+    "ref_name": {
+      "include": ["~ALL"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "update"
+    },
+    {
+      "type": "deletion"
+    }
+  ]
+}

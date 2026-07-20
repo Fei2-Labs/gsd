@@ -6,7 +6,7 @@
  * directly to os.tmpdir().
  */
 
-const { test, describe, beforeEach, afterEach } = require('node:test');
+const { test, describe, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -14,7 +14,7 @@ const os = require('os');
 
 const {
   reapStaleTempFiles,
-} = require('../get-shit-done/bin/lib/core.cjs');
+} = require('../gsd-core/bin/lib/io.cjs');
 
 const GSD_TEMP_DIR = path.join(os.tmpdir(), 'gsd');
 
@@ -79,6 +79,7 @@ describe('dedicated gsd temp subdirectory', () => {
 
       // Verify it does not exist
       if (fs.existsSync(uniqueSubdir)) {
+        // eslint-disable-next-line local/no-raw-rmsync-in-tests -- mid-test pre-condition reset: ensures uniqueSubdir is absent before testing SUT creation behavior
         fs.rmSync(uniqueSubdir, { recursive: true, force: true });
       }
       assert.ok(!fs.existsSync(uniqueSubdir), 'test subdir should not exist before test');
@@ -120,14 +121,14 @@ describe('dedicated gsd temp subdirectory', () => {
 
       // The legacy reap function should still clean old-location files
       // We import it if exported, or verify the main reap handles both
-      const core = require('../get-shit-done/bin/lib/core.cjs');
-      if (typeof core.reapStaleTempFilesLegacy === 'function') {
-        core.reapStaleTempFilesLegacy(testPrefix, { maxAgeMs: 5 * 60 * 1000 });
+      const ioModule = require('../gsd-core/bin/lib/io.cjs');
+      if (typeof ioModule.reapStaleTempFilesLegacy === 'function') {
+        ioModule.reapStaleTempFilesLegacy(testPrefix, { maxAgeMs: 5 * 60 * 1000 });
         assert.ok(!fs.existsSync(oldLocationPath), 'legacy reap should clean old location');
       } else {
         // If no separate legacy function, the main output() should do a one-time
         // migration sweep. We just verify the export shape is correct.
-        assert.ok(typeof core.reapStaleTempFiles === 'function');
+        assert.ok(typeof ioModule.reapStaleTempFiles === 'function');
         // Clean up manually since we're not testing migration here
         fs.unlinkSync(oldLocationPath);
       }

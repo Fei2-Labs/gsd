@@ -11,7 +11,7 @@ body:
         A feature adds something new to GSD — a new command, workflow, concept, or integration. Features have the **highest bar** for acceptance because every feature adds permanent maintenance burden to a project built for solo developers.
 
         **Before opening this issue:**
-        - Check [Discussions](https://github.com/gsd-build/get-shit-done/discussions) — has this been proposed and declined before?
+        - Check [Discussions](https://github.com/open-gsd/gsd-core/discussions) — has this been proposed and declined before?
         - Read [CONTRIBUTING.md](../../CONTRIBUTING.md#-feature) — understand what "approved-feature" means and why you must wait for it before writing code.
         - Ask yourself: *does this solve a real problem for a solo developer working with an AI coding tool, or is it a feature I personally want?*
 
@@ -105,11 +105,11 @@ body:
         If you cannot fill this out, you do not understand the codebase well enough to propose this feature yet.
       placeholder: |
         Files that would be created:
-        - `get-shit-done/commands/gsd/rollback.md` — new slash command definition
+        - `gsd-core/commands/gsd/rollback.md` — new slash command definition
 
         Files that would be modified:
-        - `get-shit-done/bin/lib/state.cjs` — add rollback() function
-        - `get-shit-done/bin/lib/phases.cjs` — expose phase snapshot API
+        - `gsd-core/bin/lib/state.cjs` — add rollback() function
+        - `gsd-core/bin/lib/phases.cjs` — expose phase snapshot API
         - `tests/rollback.test.cjs` — new test file
         - `docs/COMMANDS.md` — document new command
         - `CHANGELOG.md` — entry for this feature
@@ -170,7 +170,6 @@ body:
       description: Which runtimes must this work with? Check all that apply.
       options:
         - label: Claude Code
-        - label: Gemini CLI
         - label: OpenCode
         - label: Codex
         - label: Copilot

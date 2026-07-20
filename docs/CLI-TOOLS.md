@@ -1,6 +1,6 @@
 # GSD CLI Tools Reference
 
-> Surface-area reference for `get-shit-done/bin/gsd-tools.cjs` (legacy Node CLI). Workflows and agents should prefer `gsd-sdk query` or `@gsd-build/sdk` where a handler exists — see [SDK and programmatic access](#sdk-and-programmatic-access). For slash commands and user flows, see [Command Reference](COMMANDS.md).
+> Reference for the `gsd-tools` CLI (`gsd-core/bin/gsd-tools.cjs`). For slash commands and user flows, see [Command Reference](COMMANDS.md). Return to [docs index](README.md).
 
 ---
 
@@ -11,9 +11,9 @@
 
 |                    |                                                                                                                                                                                                        |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Shipped path**   | `get-shit-done/bin/gsd-tools.cjs`                                                                                                                                                                      |
-| **Implementation** | 20 domain modules under `get-shit-done/bin/lib/` (the directory is authoritative)                                                                                                                        |
-| **Status**         | Maintained for parity tests and CJS-only entrypoints; `gsd-sdk query` / SDK registry are the supported path for new orchestration (see [QUERY-HANDLERS.md](../sdk/src/query/QUERY-HANDLERS.md)). |
+| **Shipped path**   | `gsd-core/bin/gsd-tools.cjs`                                                                                                                                                                      |
+| **Implementation** | 20 domain modules under `gsd-core/bin/lib/` (the directory is authoritative)                                                                                                                        |
+| **Status**         | Primary runtime command surface for orchestration, workflows, and automation. |
 
 
 **Usage (CJS):**
@@ -29,46 +29,8 @@ node gsd-tools.cjs <command> [args] [--raw] [--cwd <path>]
 | -------------- | ---------------------------------------------------------------------------- |
 | `--raw`        | Machine-readable output (JSON or plain text, no formatting)                  |
 | `--cwd <path>` | Override working directory (for sandboxed subagents)                         |
-| `--ws <name>`  | Workstream context (also honored when the SDK spawns this binary; see below) |
+| `--ws <name>`  | Workstream context for `.planning/workstreams/<name>` paths |
 
-
----
-
-## SDK and programmatic access
-
-Use this when authoring workflows, not when you only need the command list below.
-
-**1. CLI — `gsd-sdk query <argv…>`**
-
-- Resolves argv with the same **longest-prefix** rules as the typed registry (`resolveQueryArgv` in `sdk/src/query/registry.ts`). Unregistered commands **fail fast** — use `node …/gsd-tools.cjs` only for handlers not in the registry.
-- Full matrix (CJS command → registry key, CLI-only tools, aliases, golden tiers): [sdk/src/query/QUERY-HANDLERS.md](../sdk/src/query/QUERY-HANDLERS.md).
-
-**2. TypeScript — `@gsd-build/sdk` (`GSDTools`, `createRegistry`)**
-
-- `GSDTools` now routes through the **SDK Runtime Bridge Module** (`sdk/src/query-runtime-bridge.ts`). Native registry dispatch is preferred; subprocess fallback is explicit policy (`allowFallbackToSubprocess`) and can be disabled for strict SDK-only execution.
-- `strictSdk` mode fails fast when a command has no native adapter, making SDK publish/readiness checks deterministic.
-- Structured bridge observability is available via `onDispatchEvent` (dispatch mode, fallback reason, duration, outcome, error kind).
-- For direct typed dispatch without `GSDTools`, use `createRegistry()` from `sdk/src/query/index.ts`, or invoke `gsd-sdk query` (see [QUERY-HANDLERS.md](../sdk/src/query/QUERY-HANDLERS.md)).
-- Conventions: mutation event wiring, `GSDError` vs `{ data: { error } }`, locks, and stubs — [QUERY-HANDLERS.md](../sdk/src/query/QUERY-HANDLERS.md).
-
-**CJS → SDK examples (same project directory):**
-
-
-| Legacy CJS                               | Preferred `gsd-sdk query` (examples) |
-| ---------------------------------------- | ------------------------------------ |
-| `node gsd-tools.cjs init phase-op 12`    | `gsd-sdk query init phase-op 12`     |
-| `node gsd-tools.cjs phase-plan-index 12` | `gsd-sdk query phase-plan-index 12`  |
-| `node gsd-tools.cjs state json`          | `gsd-sdk query state json`           |
-| `node gsd-tools.cjs roadmap analyze`     | `gsd-sdk query roadmap analyze`      |
-
-
-**SDK state reads:** `state.json` and `state.load` are both registered query handlers with parity coverage. You can invoke them through `gsd-sdk query …` and through the SDK Runtime Bridge (`GSDTools` → `sdk/src/query-runtime-bridge.ts`), honoring `allowFallbackToSubprocess` / `strictSdk` and emitting `onDispatchEvent` observability. For direct typed dispatch, use `createRegistry()` from `sdk/src/query/index.ts`. Full routing and golden rules: [QUERY-HANDLERS.md](../sdk/src/query/QUERY-HANDLERS.md).
-
-**CLI-only (not in registry):** e.g. **graphify**, **from-gsd2** / **gsd2-import** — call `gsd-tools.cjs` until registered.
-
-**Mutation events (SDK):** `QUERY_MUTATION_COMMANDS` in `sdk/src/query/index.ts` lists commands that may emit structured events after a successful dispatch. Exceptions called out in QUERY-HANDLERS: `state validate` (read-only), `skill-manifest` (writes only with `--write`), `intel update` (stub).
-
-**Golden parity:** Policy and CJS↔SDK test categories are documented under **Golden parity** in [QUERY-HANDLERS.md](../sdk/src/query/QUERY-HANDLERS.md).
 
 ---
 
@@ -131,6 +93,17 @@ node gsd-tools.cjs state-snapshot
 
 Returns JSON with: current position, phase, plan, status, decisions, blockers, metrics, last activity.
 
+### Smart Entry
+
+Read-only situation classifier used by `/gsd:next`.
+
+```bash
+node gsd-tools.cjs smart-entry          # Human summary + recommended route
+node gsd-tools.cjs smart-entry --json   # Machine-readable result for workflows
+```
+
+The JSON result contains `situation`, `recommended`, `summary`, `signals`, and ordered `actions[]`. Detection reads `.planning/STATE.md`, `ROADMAP.md`, latest verification/summary artifacts, and git status; it does not write files or dispatch commands.
+
 ---
 
 ## Phase Commands
@@ -155,6 +128,10 @@ node gsd-tools.cjs phase remove <phase> [--force]
 
 # Mark phase complete, update state + roadmap
 node gsd-tools.cjs phase complete <phase>
+
+# Evaluate HUMAN-UAT results for a phase (markdown-aware; ignores false-positive contexts)
+# Returns JSON: { passed, uat_files[], verification_files[], checks[], blockers[], policy }
+node gsd-tools.cjs phase uat-passed <phase> [--require-verification]
 
 # Index plans with waves and status
 node gsd-tools.cjs phase-plan-index <phase>
@@ -199,6 +176,122 @@ node gsd-tools.cjs config-get <key>
 # Set model profile
 node gsd-tools.cjs config-set-model-profile <profile>
 ```
+
+---
+
+## Capability Commands
+
+The capability command family resolves and mutates capability state (ADR-857). One resolved state composes three substrates: the install profile (`.gsd-profile`), the runtime surface (`.gsd-surface.json`), and config gates (`.planning/config.json` `workflow.*`). `enabled = installed && surfaced`; a hook is `active` only when its capability is enabled and its config gate is on.
+
+### `capability state`
+
+```bash
+node gsd-tools.cjs capability state [--config-dir <path>] [--raw]
+```
+
+Resolves and prints every capability's `installed`, `surfaced`, `enabled`, and per-hook `active` state. Read-only. `--config-dir` selects the runtime config directory (defaults to the resolved Claude home). `--raw` emits JSON.
+
+### `capability set`
+
+```bash
+node gsd-tools.cjs capability set <id> [--on | --off] [--gate <key>=<true|false>]... [--config-dir <path>] [--runtime <name>] [--scope <global|project>] [--raw]
+```
+
+Mutates one capability, re-resolves, and reports the result. Two axes:
+
+- `--on` / `--off` (aliases `--enable` / `--disable`): the capability on/off switch, applied through the runtime surface. `--off` unsurfaces the capability; the change is reversible and reclaims the surface budget. A capability that owns no skills has no surface footprint — use `--gate` for those.
+- `--gate <key>=<true|false>` (repeatable): toggles one of the capability's own config keys (a hook gate) within an enabled capability.
+- `--runtime` / `--scope`: materialise the surface change for that runtime's artifact layout.
+
+After writing, the command re-resolves and prints two message classes to stderr: errors (non-zero exit) — unknown capability id, a `--gate` key the capability does not own, a non-boolean gate value, or `--on` for a capability whose skills are not in the install profile; warnings (exit 0) — `--on`/`--off` on a skill-less capability, or a capability left surfaced while every hook is gated off ("present but dead"). Exit status is non-zero only when a requested change could not be applied.
+
+**Examples:**
+
+```bash
+# Turn the UI capability off
+node gsd-tools.cjs capability set ui --off --config-dir ~/.claude
+
+# Keep the capability on, gate one hook off
+node gsd-tools.cjs capability set code-review --gate workflow.code_review=false
+```
+
+---
+
+## Teams Status
+
+### `query teams-status`
+
+```bash
+node gsd-tools.cjs query teams-status [--active]
+```
+
+Read-only detector for claude-code's experimental agent-teams feature (issue #1355). Resolves the runtime via the canonical `GSD_RUNTIME` → `config.runtime` → `'claude'` precedence, then checks `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`.
+
+**Default (no flags):** prints a JSON object and exits 0:
+
+```json
+{
+  "active": false,
+  "runtime": "claude",
+  "env_present": false,
+  "source": "off: flag absent"
+}
+```
+
+Fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `active` | boolean | `true` only when `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is strictly truthy (`"1"` or `"true"`, case-insensitive) **and** the resolved runtime is `"claude"` |
+| `runtime` | string | The resolved runtime name (e.g. `"claude"`, `"codex"`) |
+| `env_present` | boolean | `true` when the env flag is set to a strictly-truthy value |
+| `source` | string | One of: `"on: env"`, `"off: flag absent"`, `"off: non-claude"` |
+
+**`--active` flag:** exits 0 if `active` is true, exits 1 otherwise. Prints nothing. Useful in bash conditionals:
+
+```bash
+if gsd_run query teams-status --active >/dev/null 2>&1; then
+  echo "agent-teams is on"
+fi
+```
+
+This command is strictly read-only — no config writes, no disk mutation.
+
+---
+
+### `query eval.score`
+
+```bash
+node gsd-tools.cjs query eval.score --covered <N> --total <N> --infra <tooling>,<dataset>,<cicd>,<guardrails>,<tracing>
+```
+
+Deterministic scorer for eval-auditor results. Computes coverage, infrastructure, and overall scores from audited inputs. Called by `gsd-eval-auditor` in its `calculate_scores` step — agents must not recompute these values by hand.
+
+**Inputs:**
+
+| Flag | Type | Description |
+|---|---|---|
+| `--covered` | integer | Number of eval dimensions scored COVERED |
+| `--total` | integer | Total planned eval dimensions |
+| `--infra` | string | Comma-separated list of 5 infra component statuses (order: tooling, dataset, cicd, guardrails, tracing); each value is `ok`, `partial`, or `missing` |
+
+**Output JSON:**
+
+| Field | Type | Description |
+|---|---|---|
+| `coverage_score` | number | `covered / total × 100` |
+| `infra_score` | number | `(sum of component weights) / 5 × 100` (`ok`=1, `partial`=0.5, `missing`=0) |
+| `overall_score` | number | `(coverage_score × 0.6) + (infra_score × 0.4)` |
+| `verdict` | string | `PRODUCTION READY` (80–100) / `NEEDS WORK` (60–<80) / `SIGNIFICANT GAPS` (40–<60) / `NOT IMPLEMENTED` (0–<40) |
+
+**Example:**
+
+```bash
+node gsd-tools.cjs query eval.score --covered 3 --total 5 --infra ok,partial,missing,ok,ok
+# → {"coverage_score":60,"infra_score":70,"overall_score":64,"verdict":"NEEDS WORK"}
+```
+
+This command is strictly read-only — no config writes, no disk mutation.
 
 ---
 
@@ -258,11 +351,15 @@ node gsd-tools.cjs validate health [--repair]
 
 # Probe context-window utilization for status-line / hook callers (v1.40.0)
 node gsd-tools.cjs validate context
+
+# Context utilization as typed JSON surface (#455)
+node gsd-tools.cjs validate context --json
 ```
 
 `validate context` emits a structured envelope with `utilization`, `status`
 (`ok` / `warn` / `critical` at the 60 % / 70 % thresholds), and a
 `suggestion` string. The same data backs `/gsd-health --context`.
+Pass `--json` to receive the typed IR directly (useful in scripts and test assertions).
 
 ---
 
@@ -324,13 +421,14 @@ node gsd-tools.cjs scaffold phase-dir --phase N --name "phase name"
 
 ## Init Commands (Compound Context Loading)
 
-Load all context needed for a specific workflow in one call. Returns JSON with project info, config, state, and workflow-specific data.
+Load all context needed for a specific workflow in one call. Returns JSON with project info, config, state, and workflow-specific data. `init onboard [--fast] [--text]` reports brownfield signals, planning-doc candidates, codebase-map completeness, fast-map readiness, text-mode routing, partial planning state, and onboarding summary status for `/gsd-onboard`.
 
 ```bash
 node gsd-tools.cjs init execute-phase <phase>
 node gsd-tools.cjs init plan-phase <phase>
 node gsd-tools.cjs init new-project
 node gsd-tools.cjs init new-milestone
+node gsd-tools.cjs init onboard [--fast] [--text]
 node gsd-tools.cjs init quick <description>
 node gsd-tools.cjs init resume
 node gsd-tools.cjs init verify-work <phase>
@@ -340,7 +438,7 @@ node gsd-tools.cjs init milestone-op
 node gsd-tools.cjs init map-codebase
 node gsd-tools.cjs init progress
 
-# Workstream-scoped init (SDK --ws flag)
+# Workstream-scoped init (`--ws` flag)
 node gsd-tools.cjs init execute-phase <phase> --ws <name>
 node gsd-tools.cjs init plan-phase <phase> --ws <name>
 ```
@@ -358,12 +456,43 @@ if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 
 ```bash
 # Archive milestone
-node gsd-tools.cjs milestone complete <version> [--name <name>] [--archive-phases]
+node gsd-tools.cjs milestone complete <version> [--name <name>] [--no-archive-phases]
 
 # Mark requirements as complete
 node gsd-tools.cjs requirements mark-complete <ids>
 # Accepts: REQ-01,REQ-02 or REQ-01 REQ-02 or [REQ-01, REQ-02]
 ```
+
+---
+
+## Agent Skills
+
+Emit the skill block for a given agent type.
+
+```bash
+# Emit raw XML skill block (default — safe for shell expansion)
+node gsd-tools.cjs agent-skills <agent-type>
+
+# Emit typed JSON surface (#455) — { agent_type, block, skills_count, warnings, configured, reason, source, degraded }
+node gsd-tools.cjs agent-skills <agent-type> --json
+```
+
+The `--json` flag returns a typed IR object suitable for structured consumption and test assertions, while the default (no flag) preserves the raw XML output that workflow shell expansions rely on.
+
+**`--json` field reference** (as of #1415, Resolution Provenance P2):
+
+| Field | Type | Description |
+|---|---|---|
+| `agent_type` | `string` | The agent type that was queried. |
+| `block` | `string` | The `<agent_skills>` XML block, or `""` when empty. |
+| `skills_count` | `number` | Number of skill paths configured for this agent type. |
+| `warnings` | `string[]` | Per-path warnings for skills that were skipped (missing `SKILL.md`, unsafe path, etc.). Empty when all configured paths resolved. |
+| `configured` | `boolean` | `true` when the agent type appears in `agent_skills` in the config; `false` when the key is absent entirely. |
+| `reason` | `string` | Resolution reason: `"resolved"` (block non-empty), `"not_configured"` (agent not in `agent_skills` — silent), `"configured_empty"` (configured but paths list is empty — emits stderr WARNING), `"configured_unresolved"` (configured with paths but all failed to resolve — emits stderr WARNING). |
+| `source` | `string` | Config provenance: `"root"` (`.planning/config.json`), `"workstream"` (workstream-scoped config), `"global-defaults"` (`~/.gsd/defaults.json`), `"builtin-defaults"` (no project config). |
+| `degraded` | `boolean` | `true` when a workstream was requested but its config.json was absent and the command fell back to root config; `false` otherwise. |
+
+The command anchors to the project root via `findProjectRoot` before loading config, so invoking it from a descendant subdirectory resolves the same config as the project root.
 
 ---
 
@@ -396,8 +525,14 @@ node gsd-tools.cjs current-timestamp [full|date|filename]
 # Count and list pending todos
 node gsd-tools.cjs list-todos [area]
 
+# List captured seeds (optionally filter by status: dormant|active|triggered)
+node gsd-tools.cjs list-seeds [status]
+
 # Check file/directory existence
 node gsd-tools.cjs verify-path-exists <path>
+
+# Append a row to STATE.md's "Quick Tasks Completed" table (schema-backed; #2133)
+node gsd-tools.cjs quick-tasks-append --task "<description>"
 
 # Aggregate all SUMMARY.md data
 node gsd-tools.cjs history-digest
@@ -408,8 +543,11 @@ node gsd-tools.cjs summary-extract <path> [--fields field1,field2]
 # Project statistics
 node gsd-tools.cjs stats [json|table]
 
-# Progress rendering
+# Progress rendering (human-readable)
 node gsd-tools.cjs progress [json|table|bar]
+
+# Progress as typed JSON surface (#455)
+node gsd-tools.cjs progress --json
 
 # Complete a todo
 node gsd-tools.cjs todo complete <filename>
@@ -436,9 +574,51 @@ node gsd-tools.cjs websearch <query> [--limit N] [--freshness day|week|month]
 
 ---
 
+## Worktree Commands
+
+Diagnose and configure the worktree fork base used by Claude Code's `isolation="worktree"` executor dispatch. These commands address the branch-divergence condition described in [Fix the worktree base-mismatch (exit 42) error](how-to/fix-worktree-base-mismatch.md).
+
+```bash
+# Check whether the current HEAD has diverged from the worktree fork base.
+# Returns JSON: { shouldDegrade, reason, message, headSha, forkRef, forkSha }
+node gsd-tools.cjs worktree base-check
+
+# Write worktree.baseRef:"head" into .claude/settings.local.json (no-clobber).
+# Returns JSON: { changed, skipped, previous, baseRef, file }
+node gsd-tools.cjs worktree set-baseref
+```
+
+**`worktree base-check`** reads `worktree.baseRef` from a three-layer cascade — `.claude/settings.local.json`, then `.claude/settings.json`, then the user/global `settings.json` under `CLAUDE_CONFIG_DIR` (or `~/.claude`) — and compares the current `HEAD` SHA against `origin/HEAD`. Project-level settings take precedence over the user/global layer, so a machine-wide `worktree.baseRef:"head"` set via `/config` is honored when no project override exists. The `shouldDegrade` field is `true` when the execute-phase orchestrator will fall back to sequential execution. Possible `reason` values:
+
+| `reason` | `shouldDegrade` | Meaning |
+|---|---|---|
+| `baseref-head` | `false` | `worktree.baseRef:"head"` is set; no mismatch possible |
+| `head-matches-fork` | `false` | HEAD and `origin/HEAD` are the same commit |
+| `head-diverged-from-fork` | `true` | Branch is ahead of or diverged from `origin/HEAD` |
+| `fork-ref-unknown` | `true` | `origin/HEAD` could not be resolved |
+| `no-head` | `false` | Not in a git repo (no `HEAD`) |
+
+**`worktree set-baseref`** applies a no-clobber write of `worktree.baseRef:"head"` to `.claude/settings.local.json`. If the file already contains an explicit `baseRef` value other than `"head"`, the existing value is preserved and `skipped:"explicit-other"` is returned. Malformed JSON causes an error rather than a silent overwrite. Both fresh installs and upgrades of GSD Core run this automatically when `workflow.use_worktrees` is enabled (the default); the command is also available for manual use — for example, to apply the setting when worktrees were toggled on after installation, or to re-apply it after a settings change.
+
+### Wave-manifest recording
+
+The execute-phase orchestrator records each spawned executor's worktree identity into a wave cleanup manifest so the matching `cleanup-wave` reader can later merge and remove exactly those worktrees.
+
+```bash
+# Append a validated per-agent entry to the wave cleanup manifest.
+# Returns JSON: { ok, reason, entry, manifest_path } (exit 0), or
+#   { ok:false, reason, hint } with a non-zero exit on a rejected entry.
+node gsd-tools.cjs worktree record-agent \
+  --manifest <path> --agent-id <id> --path <worktree> --branch <branch> --base <sha>
+```
+
+**`worktree record-agent`** appends one `{agent_id, worktree_path, branch, expected_base}` entry to an already-initialized manifest, validating every field **at write time using the same rules the `cleanup-wave` reader enforces** — `--branch` must match the disposable `^worktree-agent-[A-Za-z0-9._/-]+$` namespace, and `--path`/`--branch`/`--base` must be non-empty. `--agent-id` is required (write-strict), even though the reader treats it as optional. A missing or garbled field — or a duplicate `(worktree_path, branch)` the reader would dedup away — fails loudly with a recovery hint and a non-zero exit **without** writing, instead of appending an under-populated or silently-dropped entry. Whitespace-only `--path`/`--base` are rejected (values are trimmed). The on-disk manifest shape is unchanged (the reader re-derives `allowed_bases`); the orchestrator still initializes the empty `{orchestrator_root, worktrees: []}` shell inline before any agent is recorded.
+
+---
+
 ## Graphify
 
-Build, query, and inspect the project knowledge graph in `.planning/graphs/`. Requires `graphify.enabled: true` in `config.json` (see [Configuration Reference](CONFIGURATION.md#graphify-settings)). Graphify is **CJS-only**: `gsd-sdk query` does not yet register graphify handlers — always use `node gsd-tools.cjs graphify …`.
+Build, query, and inspect the project knowledge graph in `.planning/graphs/`. Requires `graphify.enabled: true` in `config.json` (see [Configuration Reference](CONFIGURATION.md#graphify-settings)).
 
 ```bash
 # Build or rebuild the knowledge graph
@@ -486,30 +666,35 @@ User-facing entry point: `/gsd-graphify` (see [Command Reference](COMMANDS.md#gs
 | Audit | `lib/audit.cjs` | Phase/milestone audit queue handlers; `audit-open` helper |
 | GSD2 Import | `lib/gsd2-import.cjs` | Reverse-migration importer from GSD-2 projects (backs `/gsd-import --from-gsd2`) |
 | Intel | `lib/intel.cjs` | Queryable codebase intelligence index (backs `/gsd-map-codebase --query`) |
+| Capability State | `lib/capability-state.cjs` | Capability-state resolver — composes install profile, surface, and config into per-capability `enabled`/`active` view |
+| Capability Writer | `lib/capability-writer.cjs` | Capability-state writer (ADR-1213) — write-side inverse; projects `--on`/`--off`/`--gate` onto surface + config substrates then re-resolves |
+| Worktree Base Ref | `lib/worktree-base-ref.cjs` | Worktree fork-base detection and `worktree base-check` / `set-baseref` commands (#683) |
 
 ---
 
 ## Reviewer CLI Routing
 
-`review.models.<cli>` maps a reviewer flavor to a shell command invoked by the code-review workflow. Set via [`/gsd-config --integrations`](COMMANDS.md#gsd-config) or directly:
+`review.models.<cli>` maps a reviewer flavor to a bare model id injected into the CLI's `--model` (or `-m`) flag by the code-review workflow. Set via [`/gsd-config --integrations`](COMMANDS.md#gsd-config) or directly:
 
 ```bash
-gsd-sdk query config-set review.models.codex    "codex exec --model gpt-5"
-gsd-sdk query config-set review.models.gemini   "gemini -m gemini-2.5-pro"
-gsd-sdk query config-set review.models.opencode "opencode run --model claude-sonnet-4"
-gsd-sdk query config-set review.models.claude   ""   # clear — fall back to session model
+node gsd-tools.cjs config-set review.models.codex    "gpt-5"
+node gsd-tools.cjs config-set review.models.gemini   "gemini-2.5-pro"
+node gsd-tools.cjs config-set review.models.opencode "claude-sonnet-4"
+node gsd-tools.cjs config-set review.models.claude   ""   # clear — fall back to session model
 ```
 
 Slugs are validated against `[a-zA-Z0-9_-]+`; empty or path-containing slugs are rejected. See [`docs/CONFIGURATION.md`](CONFIGURATION.md#code-review-cli-routing) for the full field reference.
 
 ## Secret Handling
 
-API keys configured via `/gsd-settings` (`brave_search`, `firecrawl`, `exa_search`) are written plaintext to `.planning/config.json` but are masked (`****<last-4>`) in every `config-set` / `config-get` output, confirmation table, and interactive prompt. See `get-shit-done/bin/lib/secrets.cjs` for the masking implementation. The `config.json` file itself is the security boundary — protect it with filesystem permissions and keep it out of git (`.planning/` is gitignored by default).
+API keys configured via `/gsd-settings` (`brave_search`, `firecrawl`, `exa_search`) are written plaintext to `.planning/config.json` but are masked (`****<last-4>`) in every `config-set` / `config-get` output, confirmation table, and interactive prompt. See `gsd-core/bin/lib/secrets.cjs` for the masking implementation. The `config.json` file itself is the security boundary — protect it with filesystem permissions and keep it out of git (`.planning/` is gitignored by default).
 
 ---
 
-## See also
+## Related
 
-- [sdk/src/query/QUERY-HANDLERS.md](../sdk/src/query/QUERY-HANDLERS.md) — registry matrix, routing, golden parity, intentional CJS differences
-- [Architecture](ARCHITECTURE.md) — where `gsd-sdk query` fits in orchestration
-- [Command Reference](COMMANDS.md) — user-facing `/gsd-` commands
+- [Commands](COMMANDS.md)
+- [Configuration](CONFIGURATION.md)
+- [Architecture](ARCHITECTURE.md)
+- [Fix the worktree base-mismatch (exit 42) error](how-to/fix-worktree-base-mismatch.md)
+- [docs index](README.md)

@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 process.env.GSD_TEST_MODE = '1';
 
@@ -14,7 +14,6 @@ const { createTempDir, cleanup } = require('./helpers.cjs');
 
 const {
   getDirName,
-  getGlobalDir,
   getConfigDirFromHome,
   convertClaudeToCodebuddyMarkdown,
   convertClaudeCommandToCodebuddySkill,
@@ -22,11 +21,14 @@ const {
   install,
   uninstall,
   writeManifest,
-  installRuntimeArtifacts,
 } = require('../bin/install.js');
 
+const { installRuntimeArtifacts } = require('../gsd-core/bin/lib/install-engine.cjs');
+
+const { getGlobalConfigDir } = require('../gsd-core/bin/lib/runtime-homes.cjs');
+
 // ─── Profile resolution for installRuntimeArtifacts tests ────────────────────
-const _gsdLibDir = path.join(__dirname, '..', 'get-shit-done', 'bin', 'lib');
+const _gsdLibDir = path.join(__dirname, '..', 'gsd-core', 'bin', 'lib');
 const { loadSkillsManifest, resolveProfile } = require(path.join(_gsdLibDir, 'install-profiles.cjs'));
 const _manifest = loadSkillsManifest();
 const resolvedProfileFull = resolveProfile({ modes: [], manifest: _manifest });
@@ -37,7 +39,7 @@ describe('CodeBuddy runtime directory mapping', () => {
   });
 
   test('maps CodeBuddy to ~/.codebuddy for global installs', () => {
-    assert.strictEqual(getGlobalDir('codebuddy'), path.join(os.homedir(), '.codebuddy'));
+    assert.strictEqual(getGlobalConfigDir('codebuddy'), path.join(os.homedir(), '.codebuddy'));
   });
 
   test('returns .codebuddy config fragments for local and global installs', () => {
@@ -46,7 +48,7 @@ describe('CodeBuddy runtime directory mapping', () => {
   });
 });
 
-describe('getGlobalDir (CodeBuddy)', () => {
+describe('getGlobalConfigDir (CodeBuddy)', () => {
   let originalCodebuddyConfigDir;
 
   beforeEach(() => {
@@ -63,30 +65,30 @@ describe('getGlobalDir (CodeBuddy)', () => {
 
   test('returns ~/.codebuddy with no env var or explicit dir', () => {
     delete process.env.CODEBUDDY_CONFIG_DIR;
-    const result = getGlobalDir('codebuddy');
+    const result = getGlobalConfigDir('codebuddy');
     assert.strictEqual(result, path.join(os.homedir(), '.codebuddy'));
   });
 
   test('returns explicit dir when provided', () => {
-    const result = getGlobalDir('codebuddy', '/custom/codebuddy-path');
+    const result = getGlobalConfigDir('codebuddy', '/custom/codebuddy-path');
     assert.strictEqual(result, '/custom/codebuddy-path');
   });
 
   test('respects CODEBUDDY_CONFIG_DIR env var', () => {
     process.env.CODEBUDDY_CONFIG_DIR = '~/custom-codebuddy';
-    const result = getGlobalDir('codebuddy');
+    const result = getGlobalConfigDir('codebuddy');
     assert.strictEqual(result, path.join(os.homedir(), 'custom-codebuddy'));
   });
 
   test('explicit dir takes priority over CODEBUDDY_CONFIG_DIR', () => {
     process.env.CODEBUDDY_CONFIG_DIR = '~/from-env';
-    const result = getGlobalDir('codebuddy', '/explicit/path');
+    const result = getGlobalConfigDir('codebuddy', '/explicit/path');
     assert.strictEqual(result, '/explicit/path');
   });
 
   test('does not break other runtimes', () => {
-    assert.strictEqual(getGlobalDir('claude'), path.join(os.homedir(), '.claude'));
-    assert.strictEqual(getGlobalDir('codex'), path.join(os.homedir(), '.codex'));
+    assert.strictEqual(getGlobalConfigDir('claude'), path.join(os.homedir(), '.claude'));
+    assert.strictEqual(getGlobalConfigDir('codex'), path.join(os.homedir(), '.codex'));
   });
 });
 
@@ -188,7 +190,7 @@ describe('CodeBuddy local install/uninstall', () => {
     assert.ok(result.settingsPath, 'should have settingsPath (CodeBuddy supports hooks)');
 
     assert.ok(fs.existsSync(path.join(targetDir, 'skills', 'gsd-help', 'SKILL.md')));
-    assert.ok(fs.existsSync(path.join(targetDir, 'get-shit-done', 'VERSION')));
+    assert.ok(fs.existsSync(path.join(targetDir, 'gsd-core', 'VERSION')));
     assert.ok(fs.existsSync(path.join(targetDir, 'agents')));
 
     const manifest = writeManifest(targetDir, 'codebuddy');
@@ -197,7 +199,7 @@ describe('CodeBuddy local install/uninstall', () => {
     uninstall(false, 'codebuddy');
 
     assert.ok(!fs.existsSync(path.join(targetDir, 'skills', 'gsd-help')), 'CodeBuddy skill directory removed');
-    assert.ok(!fs.existsSync(path.join(targetDir, 'get-shit-done')), 'get-shit-done removed');
+    assert.ok(!fs.existsSync(path.join(targetDir, 'gsd-core')), 'gsd-core removed');
   });
 });
 
@@ -257,12 +259,12 @@ describe('E2E: CodeBuddy uninstall skills cleanup', () => {
     const targetDir = path.join(tmpDir, '.codebuddy');
     install(false, 'codebuddy');
 
-    assert.ok(fs.existsSync(path.join(targetDir, 'get-shit-done', 'VERSION')),
+    assert.ok(fs.existsSync(path.join(targetDir, 'gsd-core', 'VERSION')),
       'engine exists before uninstall');
 
     uninstall(false, 'codebuddy');
 
-    assert.ok(!fs.existsSync(path.join(targetDir, 'get-shit-done')),
-      'get-shit-done engine should be removed after CodeBuddy uninstall');
+    assert.ok(!fs.existsSync(path.join(targetDir, 'gsd-core')),
+      'gsd-core engine should be removed after CodeBuddy uninstall');
   });
 });

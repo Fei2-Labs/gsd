@@ -20,11 +20,11 @@ const path = require('node:path');
 
 const COMMANDS_DIR = path.join(__dirname, '..', 'commands', 'gsd');
 const SEARCH_DIRS = [
-  path.join(__dirname, '..', 'get-shit-done', 'bin', 'lib'),
-  path.join(__dirname, '..', 'get-shit-done', 'workflows'),
-  path.join(__dirname, '..', 'get-shit-done', 'references'),
-  path.join(__dirname, '..', 'get-shit-done', 'templates'),
-  path.join(__dirname, '..', 'get-shit-done', 'contexts'),
+  path.join(__dirname, '..', 'gsd-core', 'bin', 'lib'),
+  path.join(__dirname, '..', 'gsd-core', 'workflows'),
+  path.join(__dirname, '..', 'gsd-core', 'references'),
+  path.join(__dirname, '..', 'gsd-core', 'templates'),
+  path.join(__dirname, '..', 'gsd-core', 'contexts'),
   path.join(__dirname, '..', 'commands', 'gsd'),
   path.join(__dirname, '..', 'agents'),
   path.join(__dirname, '..', 'hooks'),
@@ -92,9 +92,21 @@ function transformContentToHyphen(src, cmdNames) {
 }
 
 function readCmdNames() {
-  return fs.readdirSync(COMMANDS_DIR)
-    .filter(f => f.endsWith('.md'))
-    .map(f => f.replace(/\.md$/, ''));
+  try {
+    return fs.readdirSync(COMMANDS_DIR)
+      .filter(f => f.endsWith('.md'))
+      .map(f => f.replace(/\.md$/, ''));
+  } catch (err) {
+    // Only swallow the missing-directory case. Any other error (EACCES, ENOTDIR,
+    // etc.) indicates a real misconfiguration and must propagate so callers are
+    // not silently handed an empty registry while the real problem goes undetected.
+    if (err.code !== 'ENOENT') throw err;
+    // COMMANDS_DIR may not exist on installs that use skill-based runtimes or
+    // global Claude installs (no local commands/gsd/ directory). Return [] so
+    // callers that handle an empty array gracefully (buildPattern returns null,
+    // transformContent is a no-op) are not broken by a missing directory.
+    return [];
+  }
 }
 
 function processFile(file, cmdNames) {

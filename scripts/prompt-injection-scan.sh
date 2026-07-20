@@ -69,17 +69,39 @@ ALLOWLIST=(
   'scripts/prompt-injection-scan.sh'
   'scripts/base64-scan.sh'
   'scripts/secret-scan.sh'
-  'tests/security-scan.test.cjs'
+  'tests/security-scan.security.test.cjs'
   'tests/security.test.cjs'
-  'tests/prompt-injection-scan.test.cjs'
+  'tests/prompt-injection-scan.security.test.cjs'
   'tests/verify.test.cjs'
-  'get-shit-done/bin/lib/security.cjs'
+  'gsd-core/bin/lib/security.cjs'
   'hooks/gsd-prompt-guard.js'
   'hooks/gsd-read-injection-scanner.js'
-  'tests/read-injection-scanner.test.cjs'
-  'tests/security-prompt-injection.test.cjs'
+  'tests/read-injection-scanner.security.test.cjs'
+  'tests/read-injection-scanner.property.test.cjs'
+  'tests/security-prompt-injection.security.test.cjs'
+  'tests/list-seeds.test.cjs'
   'tests/fixtures/adversarial/security/'
   'SECURITY.md'
+  # These files contain intentional injection examples / security-model prose
+  # and are not attack vectors — they explain/demonstrate injection patterns.
+  'TEST-EXAMPLES.md'
+  'explanation/security-model.md'
+  # The untrusted-input boundary reference quotes injection phrases
+  # ("ignore previous instructions", "you are now…") as examples agents must
+  # NOT comply with — it is the defense, not an attack vector.
+  'references/untrusted-input-boundary.md'
+  # Security regression tests for input validators — fixtures must contain
+  # real injection payloads to prove the validator rejects them. See
+  # DEFECT.PROMPT-INJECTION-SCAN-COLLISION in CONTEXT.md.
+  'tests/windsurf-conversion.test.cjs'
+  # RuleTester fixtures for the local/no-unguarded-nonportable-exec ESLint rule
+  # contain shell-exec command strings (exec("sh -c …"), execFileSync('bash',['-c',…]))
+  # as test DATA the rule must lint — not attack vectors. ADR-1703 Phase 3 (#1720).
+  'tests/no-unguarded-nonportable-exec.rule.test.cjs'
+  # RuleTester fixtures for the local/no-bare-npm-exec ESLint rule contain npm
+  # exec command strings (execFileSync('npm', ['install'])) as test DATA the rule
+  # must lint — not attack vectors. ADR-1703 Phase 4 (#1726).
+  'tests/no-bare-npm-exec.rule.test.cjs'
 )
 
 is_allowlisted() {

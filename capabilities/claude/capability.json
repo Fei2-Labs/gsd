@@ -1,0 +1,105 @@
+{
+  "id": "claude",
+  "role": "runtime",
+  "version": "1.7.0",
+  "title": "Claude Code",
+  "description": "Anthropic Claude Code — primary development runtime; tier-1 support with full hook surface and skills-based global install.",
+  "tier": "core",
+  "requires": [],
+  "engines": {
+    "gsd": ">=1.6.0"
+  },
+  "runtime": {
+    "configHome": {
+      "kind": "dot-home",
+      "name": ".claude",
+      "env": [
+        "CLAUDE_CONFIG_DIR"
+      ]
+    },
+    "localConfigDir": ".claude",
+    "configFormat": "settings-json",
+    "artifactLayout": {
+      "global": [
+        {
+          "kind": "skills",
+          "destSubpath": "skills",
+          "prefix": "gsd-",
+          "nesting": "flat",
+          "recursive": false,
+          "converter": "convertClaudeCommandToClaudeSkill"
+        }
+      ],
+      "local": [
+        {
+          "kind": "commands",
+          "destSubpath": "commands",
+          "prefix": "gsd-",
+          "nesting": "flat",
+          "recursive": false,
+          "converter": null
+        },
+        {
+          "kind": "agents",
+          "destSubpath": "agents",
+          "prefix": "gsd-",
+          "nesting": "flat",
+          "recursive": false,
+          "converter": null
+        }
+      ]
+    },
+    "commandStyle": "slash-hyphen",
+    "hooksSurface": "settings-json",
+    "hookEvents": "claude",
+    "sandboxTier": "none",
+    "supportTier": 1,
+    "installSurface": "settings-json",
+    "writesSharedSettings": true,
+    "permissionWriter": null,
+    "extendedHookEvents": [
+      "SubagentStop",
+      "Stop",
+      "PreCompact",
+      "FileChanged"
+    ],
+    "hostIntegration": {
+      "embeddingMode": "imperative",
+      "commandSurface": "slash-file",
+      "dispatch": {
+        "namedDispatch": true,
+        "nested": true,
+        "maxDepth": 5,
+        "background": true,
+        "subagentToolkit": "full",
+        "backgroundDispatch": false
+      },
+      "modelMode": "passive",
+      "hookBus": "host",
+      "stateIO": "filesystem",
+      "transport": "mcp",
+      "runtime": "node"
+    },
+    "hostBehaviors": {
+      "attributionSource": "settings-json-commit",
+      "authorsCanonicalWorkflow": true,
+      "localInstallStyle": "legacy-flat",
+      "permissionsSchema": "claude",
+      "settingsFileByScope": {
+        "local": "settings.local.json",
+        "global": "settings.json"
+      },
+      "sourceMarkerFile": ".gsd-source",
+      "agentFrontmatterExtensions": [
+        "effort"
+      ],
+      "ownsClaudePaths": true,
+      "nativeModelAliases": true,
+      "skillsGlobalOnboarding": true,
+      "legacyCommandsGsdInstallMigration": true,
+      "legacyCommandsGsdUninstall": "global",
+      "hyphenNameAgentBody": true,
+      "reviewerCli": true
+    }
+  }
+}

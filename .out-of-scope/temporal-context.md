@@ -1,6 +1,6 @@
 # Temporal context as a first-class GSD signal
 
-**Source:** [#2756](https://github.com/gsd-build/get-shit-done/issues/2756)
+**Source:** [#2756](https://github.com/open-gsd/gsd-core/issues/2756)
 **Decision:** wontfix — closed without further engagement
 **Date:** 2026-05-02
 
@@ -53,4 +53,4 @@ through to a triage decision rather than dropping an issue and moving on.
 ## Related
 
 - `.planning/state/` — existing session-continuity artifacts
-- `get-shit-done/references/` — where any future plugin-interface doc would live
+- `gsd-core/references/` — where any future plugin-interface doc would live

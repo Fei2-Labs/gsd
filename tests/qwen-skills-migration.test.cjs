@@ -21,13 +21,16 @@ const fs = require('fs');
 
 const {
   convertClaudeCommandToClaudeSkill,
-  installRuntimeArtifacts,
 } = require('../bin/install.js');
+
+const { installRuntimeArtifacts } = require('../gsd-core/bin/lib/install-engine.cjs');
 
 const {
   loadSkillsManifest,
   resolveProfile,
-} = require('../get-shit-done/bin/lib/install-profiles.cjs');
+} = require('../gsd-core/bin/lib/install-profiles.cjs');
+
+const { cleanup } = require('./helpers.cjs');
 
 const manifest = loadSkillsManifest();
 const resolvedProfileFull = resolveProfile({ modes: [], manifest });
@@ -95,7 +98,7 @@ describe('Qwen Code: convertClaudeCommandToClaudeSkill', () => {
   });
 
   test('preserves body content unchanged', () => {
-    const body = '\n<objective>\nDo the thing.\n</objective>\n\n<process>\nStep 1.\nStep 2.\n</process>\n';
+    const body = '\n<objective>\nDo the thing.\n</objective>\r?\n\n<process>\nStep 1.\nStep 2.\n</process>\n';
     const input = [
       '---',
       'name: gsd:test',
@@ -136,9 +139,7 @@ describe('Qwen Code: installRuntimeArtifacts', () => {
   });
 
   afterEach(() => {
-    if (fs.existsSync(tmpDir)) {
-      fs.rmSync(tmpDir, { recursive: true });
-    }
+    cleanup(tmpDir);
   });
 
   test('creates skills/gsd-xxx/SKILL.md directory structure', () => {
@@ -185,7 +186,7 @@ describe('Qwen Code: installRuntimeArtifacts', () => {
       'description: Next step',
       '---',
       '',
-      'Reference: @~/.claude/get-shit-done/workflows/next.md',
+      'Reference: @~/.claude/gsd-core/workflows/next.md',
     ].join('\n'));
 
     const configDir = path.join(tmpDir, 'dest');
@@ -208,7 +209,7 @@ describe('Qwen Code: installRuntimeArtifacts', () => {
       'description: Plan phase',
       '---',
       '',
-      'Reference: $HOME/.claude/get-shit-done/workflows/plan.md',
+      'Reference: $HOME/.claude/gsd-core/workflows/plan.md',
     ].join('\n'));
 
     const configDir = path.join(tmpDir, 'dest');
@@ -299,10 +300,10 @@ describe('Qwen Code: SKILL.md format validation', () => {
     const result = convertClaudeCommandToClaudeSkill(input, 'gsd-review');
 
     // Parse the frontmatter
-    const fmMatch = result.match(/^---\n([\s\S]*?)\n---/);
+    const fmMatch = result.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     assert.ok(fmMatch, 'has frontmatter block');
 
-    const fmLines = fmMatch[1].split('\n');
+    const fmLines = fmMatch[1].split(/\r?\n/);
     const hasName = fmLines.some(l => l.startsWith('name: gsd-review'));
     const hasDesc = fmLines.some(l => l.startsWith('description:'));
     const hasAgent = fmLines.some(l => l.startsWith('agent:'));

@@ -4,6 +4,7 @@ const cp = require('node:child_process');
 const path = require('node:path');
 
 const { parseFragment } = require('./parse.cjs');
+const { packageName, repoSlug: defaultRepoSlug } = require('../../gsd-core/bin/lib/package-identity.cjs');
 
 const SECTION_ORDER = ['Fixed', 'Added', 'Changed', 'Deprecated', 'Removed', 'Security'];
 
@@ -145,8 +146,8 @@ function serializeGithubReleaseNotes({
   ir,
   fromRef,
   toRef,
-  repoSlug = 'gsd-build/get-shit-done',
-  installCommand = 'npx get-shit-done-cc@latest',
+  repoSlug = defaultRepoSlug,
+  installCommand = `npx ${packageName}@latest`,
 }) {
   if (installCommand.includes('`')) {
     throw new Error('installCommand cannot contain backtick characters');

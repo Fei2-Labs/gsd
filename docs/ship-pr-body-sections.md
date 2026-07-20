@@ -13,8 +13,19 @@ Every generated `/gsd-ship` PR body keeps the required core sections:
 - `Requirements Addressed`
 - `Verification`
 - `Key Decisions`
+- `TDD Audit`
 
-Custom sections are append-only. They render after `Key Decisions`; they cannot replace, remove, or reorder the core sections.
+Custom sections are append-only. They render after `Key Decisions` (and before the `TDD Audit`); they cannot replace, remove, or reorder the core sections.
+
+### TDD Audit section
+
+The `TDD Audit` section is always appended last. It walks the commits in the `merge-base..HEAD` range (merges excluded), reads each commit's `gate_status:` Git trailer (`skill` | `fallback` | `exempt`), and pairs each `test:` commit with its following `feat:`/`fix:` implementation commit in a table. Commits that carry no recognized trailer are counted as `missing`.
+
+The section closes with a single aggregate trailer line that a GitHub squash-merge carries into the base branch:
+
+```
+gate_status: skill=3, fallback=1, exempt=0, missing=0
+```
 
 ## Configure Sections During Onboarding
 
@@ -31,10 +42,10 @@ Selected sections are written with `"enabled": true`. Seeded but unselected sect
 
 ## Configure Sections Manually
 
-Set `ship.pr_body_sections` with `gsd-sdk query config-set`:
+Set `ship.pr_body_sections` with `gsd-tools query config-set`:
 
 ```bash
-gsd-sdk query config-set ship.pr_body_sections '[{"heading":"Risks & Dependencies","enabled":true,"source":"PLAN.md ## Risks || PLAN.md ## Dependencies","fallback":"- No known high-risk rollout dependencies."}]'
+gsd-tools query config-set ship.pr_body_sections '[{"heading":"Risks & Dependencies","enabled":true,"source":"PLAN.md ## Risks || PLAN.md ## Dependencies","fallback":"- No known high-risk rollout dependencies."}]'
 ```
 
 You can also edit `.planning/config.json` directly:

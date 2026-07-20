@@ -5,6 +5,12 @@
  *
  * Verifies that the three agents (researcher, planner, executor) contain the
  * interlocking instruction text that forms the slopsquatting defence gate.
+ *
+ * The gate spans TWO layers. The executor stops at a `gate="blocking-human"`
+ * checkpoint and hands it up; the execute-phase orchestrator then decides
+ * whether the human ever sees it. Asserting only the executor half leaves the
+ * orchestrator free to auto-approve the checkpoint the executor just refused
+ * to auto-approve.
  */
 
 const { describe, test, before } = require('node:test');
@@ -17,8 +23,11 @@ const RESEARCHER = path.join(AGENTS, 'gsd-phase-researcher.md');
 const PLANNER = path.join(AGENTS, 'gsd-planner.md');
 const EXECUTOR = path.join(AGENTS, 'gsd-executor.md');
 
+const WORKFLOWS = path.join(__dirname, '..', 'gsd-core', 'workflows');
+const EXECUTE_PHASE = path.join(WORKFLOWS, 'execute-phase.md');
+
 function parseSections(md) {
-  const lines = md.split('\n');
+  const lines = md.split(/\r?\n/);
   const sections = [];
   let current = { heading: '__preamble__', body: [] };
   let inFence = false;
@@ -39,7 +48,7 @@ function parseSections(md) {
 
 function extractCodeBlocks(text) {
   const blocks = [];
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/);
   let inside = false;
   let buf = [];
 
@@ -59,7 +68,7 @@ function extractCodeBlocks(text) {
 }
 
 function extractResearchTemplate(content) {
-  const lines = content.split('\n');
+  const lines = content.split(/\r?\n/);
   let inside = false;
   let isMarkdownFence = false;
   let buf = [];
@@ -105,7 +114,7 @@ function normalizeTokens(text) {
   return text
     .toLowerCase()
     .replace(/https?:\/\//g, ' ')
-    .replace(/[\[\]]/g, '')
+    .replace(/[[\]]/g, '')
     .replace(/[^a-z0-9{}:_-]+/g, ' ')
     .trim()
     .split(/\s+/)
@@ -182,52 +191,53 @@ function readModel(filePath) {
   const text = fs.readFileSync(filePath, 'utf-8');
   return {
     text,
-    lines: text.split('\n'),
+    lines: text.split(/\r?\n/),
     sections: parseSections(text),
     codeBlocks: extractCodeBlocks(text),
   };
 }
 
-describe('gsd-phase-researcher.md — slopcheck invocation', () => {
+// allow-test-rule: source-text-is-the-product
+// Agent .md files — their text IS what the runtime loads.
+// Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
+
+describe('gsd-phase-researcher.md — package-legitimacy seam invocation', () => {
   let model;
 
   before(() => {
     model = readModel(RESEARCHER);
   });
 
-  test('contains slopcheck install command in a fenced code block', () => {
-    const found = model.codeBlocks.some((block) => hasAllTokens(block, ['slopcheck', 'install']));
-    assert.ok(found, 'researcher must invoke slopcheck install inside a fenced code block');
-  });
-
-  test('slopcheck invocation includes --json flag', () => {
+  test('invokes gsd-tools query package-legitimacy check inside a fenced code block', () => {
     const found = model.codeBlocks.some((block) =>
-      hasAllTokens(block, ['slopcheck', 'install']) && hasAllTokens(block, ['json'])
+      hasAllTokens(block, ['package-legitimacy', 'check'])
     );
-    assert.ok(found, 'slopcheck invocation must pass --json');
+    assert.ok(found, 'researcher must invoke package-legitimacy check inside a fenced code block');
   });
 
-  test('guards slopcheck invocation with command availability check', () => {
-    const hasCommandV = model.codeBlocks.some((block) => hasAllTokens(block, ['command', '-v', 'slopcheck']));
-    const hasWhich = model.codeBlocks.some((block) => hasAllTokens(block, ['which', 'slopcheck']));
-    assert.ok(hasCommandV || hasWhich, 'researcher must guard slopcheck invocation with command -v or which');
+  test('package-legitimacy invocation includes --ecosystem flag', () => {
+    const found = model.codeBlocks.some((block) =>
+      hasAllTokens(block, ['package-legitimacy', 'check']) && hasAllTokens(block, ['--ecosystem'])
+    );
+    assert.ok(found, 'package-legitimacy check must include --ecosystem flag');
   });
 
-  test('documents graceful degradation when slopcheck is unavailable', () => {
+  test('documents SLOP, SUS, OK verdict interpretation', () => {
+    const hasSLOP = anyLineHasAll(model.lines, ['slop']);
+    const hasSUS = anyLineHasAll(model.lines, ['sus']);
+    const hasOK = anyLineHasAll(model.lines, ['ok']);
+    assert.ok(hasSLOP && hasSUS && hasOK, 'researcher must document SLOP, SUS, OK verdict interpretation');
+  });
+
+  test('documents [ASSUMED] tag for WebSearch-discovered packages not verified against authoritative source', () => {
     const hasAssumedLine = anyLineHasAll(model.lines, ['assumed']);
-    const hasSlopcheckUnavailableLine = model.lines.some((line) => {
-      const slopcheckMention = hasAllTokens(line, ['slopcheck']);
-      const unavailableMention =
-        hasAllTokens(line, ['not', 'available']) ||
-        hasAllTokens(line, ['not', 'found']) ||
-        hasAllTokens(line, ['unavailable']) ||
-        hasAllTokens(line, ['cannot', 'installed']);
-      return slopcheckMention && unavailableMention;
-    });
-
+    const hasWebSearchOrTraining = model.lines.some((line) =>
+      hasAllTokens(line, ['websearch']) || hasAllTokens(line, ['training'])
+    );
     assert.ok(
-      hasAssumedLine && hasSlopcheckUnavailableLine,
-      'researcher must document [ASSUMED] fallback when slopcheck cannot run'
+      hasAssumedLine && hasWebSearchOrTraining,
+      'researcher must document [ASSUMED] tag for packages from non-authoritative sources'
     );
   });
 });
@@ -253,7 +263,8 @@ describe('gsd-phase-researcher.md — Package Legitimacy Audit section in templa
     const table = parseMarkdownTable(section.body);
     assert.ok(table, 'Package Legitimacy Audit section must include a markdown table');
 
-    const expected = ['Package', 'Registry', 'Age', 'Downloads', 'slopcheck', 'Disposition'];
+    // 'slopcheck' column renamed to 'Verdict' to reflect the code seam (gsd-tools query package-legitimacy)
+    const expected = ['Package', 'Registry', 'Age', 'Downloads', 'Verdict', 'Disposition'];
     for (const column of expected) {
       assert.ok(table.headers.includes(column), `audit table must have "${column}" column`);
     }
@@ -305,9 +316,11 @@ describe('gsd-phase-researcher.md — no npx --yes auto-download', () => {
     assert.equal(found, false, 'researcher must not invoke npx --yes in any code block');
   });
 
-  test('ctx7 CLI fallback uses command -v guard', () => {
-    const found = model.codeBlocks.some((block) => hasAllTokens(block, ['command', '-v', 'ctx7']));
-    assert.ok(found, 'ctx7 CLI fallback must guard with command -v ctx7 before invocation');
+  test('context7 is accessed via mcp__context7__ tools (not raw CLI)', () => {
+    // The research-plan seam routes context7 queries; the agent calls MCP tools directly.
+    // Verify the provider table references mcp__context7__ rather than a raw ctx7 CLI invocation.
+    const hasMcpContext7 = anyLineHasAll(model.lines, ['mcp__context7__']);
+    assert.ok(hasMcpContext7, 'researcher must reference mcp__context7__ tools for context7 access');
   });
 });
 
@@ -384,14 +397,16 @@ describe('gsd-planner.md — supply-chain row in threat_model template', () => {
   });
 
   test('threat_model template includes supply-chain row with mitigate disposition', () => {
-    const tables = parseMarkdownTables(threatModelBlock.split('\n'));
+    const tables = parseMarkdownTables(threatModelBlock.split(/\r?\n/));
     const strideTable = tables.find((table) => table.headers.includes('Threat ID'));
     assert.ok(strideTable, 'threat_model must include STRIDE threat register table');
 
     const supplyChainRow = strideTable.rows.find((row) => hasAllTokens(row.cells[0] || '', ['t-{phase}-sc']));
     assert.ok(supplyChainRow, 'threat_model must include T-{phase}-SC supply-chain row');
 
-    const disposition = supplyChainRow.cells[3] || '';
+    const dispoIdx = strideTable.headers.findIndex((h) => /disposition/i.test(String(h)));
+    assert.ok(dispoIdx >= 0, 'STRIDE table must have a Disposition column');
+    const disposition = supplyChainRow.cells[dispoIdx] || '';
     assert.ok(hasAllTokens(disposition, ['mitigate']), 'supply-chain threat disposition must be mitigate');
   });
 });
@@ -468,5 +483,135 @@ describe('gsd-executor.md — package installs excluded from RULE 3 auto-fix', (
       hasExceptionRule,
       'executor auto mode must explicitly block auto-approval for package-legitimacy checkpoints'
     );
+  });
+
+  // #2107 harm, one checkpoint type over: the executor auto-resolves a decision
+  // checkpoint itself (auto-selects the first option and continues) without ever
+  // returning it, so a blocking-human decision must be carved out HERE — the
+  // orchestrator's carve-out never runs for a checkpoint the executor swallowed.
+  test('auto mode does not auto-select a blocking-human decision checkpoint', () => {
+    const autoModeLine = lineIndexes(model.lines, (line) => hasAllTokens(line, ['auto-mode', 'checkpoint', 'behavior']))[0];
+    assert.notEqual(autoModeLine, undefined, 'executor must define auto-mode checkpoint behavior');
+
+    const window = model.lines.slice(autoModeLine, autoModeLine + 25);
+
+    const decisionLines = window.filter((line) => hasAllTokens(line, ['checkpoint:decision']));
+    assert.ok(decisionLines.length > 0, 'executor auto-mode must document the checkpoint:decision branch');
+
+    const gatesDecision = decisionLines.some(
+      (line) =>
+        hasAllTokens(line, ['blocking-human']) &&
+        (hasAllTokens(line, ['stop']) || hasAllTokens(line, ['not', 'auto-select']))
+    );
+
+    assert.ok(
+      gatesDecision,
+      'checkpoint:decision must carve out gate="blocking-human" (STOP + return) instead of auto-selecting the first option'
+    );
+  });
+
+  test('checkpoint_return_format transports the gate across the executor→orchestrator boundary', () => {
+    const fmt = extractXmlElement(model.text, 'checkpoint_return_format');
+    assert.ok(fmt.length > 0, 'executor must define checkpoint_return_format');
+
+    const fmtLines = fmt.split(/\r?\n/);
+    const hasGateField = fmtLines.some((line) => hasAllTokens(line, ['gate:', 'blocking-human']));
+
+    assert.ok(
+      hasGateField,
+      'checkpoint_return_format must carry a **Gate:** field so blocking-human reaches the orchestrator carve-out'
+    );
+  });
+});
+
+describe('execute-phase.md — orchestrator honors the blocking-human gate', () => {
+  let model;
+
+  before(() => {
+    model = readModel(EXECUTE_PHASE);
+  });
+
+  // The executor refuses to auto-approve a gate="blocking-human" checkpoint and
+  // returns it via checkpoint_return_format. The orchestrator's auto-mode branch
+  // is what runs next. If that branch dispatches purely on checkpoint *type*, it
+  // auto-approves the checkpoint the executor just escalated — nullifying the
+  // slopsquatting gate in exactly the unattended mode where it matters.
+  test('auto-mode checkpoint handling excludes blocking-human checkpoints', () => {
+    // NB: normalizeTokens keeps ':' as a word character, so the heading
+    // "**Auto-mode checkpoint handling:**" yields the token `handling:`, not
+    // `handling`. Anchor on the two tokens that survive intact.
+    const autoModeLine = lineIndexes(model.lines, (line) =>
+      hasAllTokens(line, ['auto-mode', 'checkpoint'])
+    )[0];
+
+    assert.notEqual(
+      autoModeLine,
+      undefined,
+      'execute-phase.md must define auto-mode checkpoint handling'
+    );
+
+    const window = model.lines.slice(autoModeLine, autoModeLine + 20);
+
+    const honorsGate =
+      anyLineHasAll(window, ['blocking-human']) ||
+      anyLineHasAll(window, ['except', 'package-legitimacy']);
+
+    assert.ok(
+      honorsGate,
+      'execute-phase auto-mode must not auto-approve gate="blocking-human" checkpoints — ' +
+        'the executor escalates them precisely so a human sees them'
+    );
+  });
+
+  test('auto-approve rule for human-verify is conditional, not unconditional', () => {
+    const autoApproveLines = lineIndexes(model.lines, (line) =>
+      hasAllTokens(line, ['human-verify', 'auto-spawn', 'approved'])
+    );
+
+    assert.ok(
+      autoApproveLines.length > 0,
+      'anchor drift: no human-verify auto-approve line matched — the conditional carve-out would pass vacuously'
+    );
+
+    for (const idx of autoApproveLines) {
+      const line = model.lines[idx];
+      const isConditional =
+        hasAllTokens(line, ['unless']) ||
+        hasAllTokens(line, ['except']) ||
+        hasAllTokens(line, ['blocking-human']) ||
+        hasAllTokens(line, ['if', 'not']);
+
+      assert.ok(
+        isConditional,
+        `execute-phase.md:${idx + 1} auto-approves human-verify unconditionally; ` +
+          'it must carve out gate="blocking-human"'
+      );
+    }
+  });
+
+  test('auto-select rule for decision is conditional, not unconditional', () => {
+    const autoSelectLines = lineIndexes(model.lines, (line) =>
+      hasAllTokens(line, ['decision', 'auto-spawn', 'first', 'option'])
+    );
+
+    assert.ok(
+      autoSelectLines.length > 0,
+      'anchor drift: no decision auto-select line matched — the conditional carve-out would pass vacuously'
+    );
+
+    for (const idx of autoSelectLines) {
+      const line = model.lines[idx];
+      const isConditional =
+        hasAllTokens(line, ['unless']) ||
+        hasAllTokens(line, ['except']) ||
+        hasAllTokens(line, ['blocking-human']) ||
+        hasAllTokens(line, ['if', 'not']);
+
+      assert.ok(
+        isConditional,
+        `execute-phase.md:${idx + 1} auto-selects a decision unconditionally; ` +
+          'it must carve out gate="blocking-human"'
+      );
+    }
   });
 });

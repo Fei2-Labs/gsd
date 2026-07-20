@@ -7,8 +7,6 @@
  * Guards against the class of bugs that can't be caught by working-tree tests:
  *   - #3684: maskIfSecret import/export mismatch shipped in v1.42.3 (runtime
  *     crash on installed package, invisible to unit tests)
- *   - #3668: 75/78 workflows call bare `gsd-sdk` without fallback; --local users
- *     see `command not found`
  *
  * Strategy: pack the working tree, install into a temp prefix, invoke the
  * installed binary, assert the version matches package.json. Exercises the
@@ -30,19 +28,15 @@
  *     - Assert commands/gsd/<cmd>.md exists in the installed package
  *     - Parse the .md for a workflow @-import or inline reference
  *     - Assert the referenced workflow .md exists in the installed package
- *   If 'init' is in lifecycleCommands, runs `get-shit-done-cc --local --claude`
+ *   If 'init' is in lifecycleCommands, runs `gsd-core --local --claude`
  *   in fixtureDir to verify the installer is callable (INIT_FAILED on crash).
  *   Non-interactive: --local --claude flags skip all prompts.
  *
- * Workflow-body checks (Cycle 3 — informational until #3668 is fixed):
- *   - Calls `gsd-sdk "query" state.json --project-dir <fixtureDir>` to verify
- *     the SDK binary is callable and produces parseable JSON (SDK_BINARY_NOT_CALLABLE).
- *   - Scans all installed get-shit-done/workflows/*.md for:
- *     (a) /gsd:<known-cmd> colon-namespace leaks (WORKFLOW_BODY_COLON_LEAK)
- *     (b) bare `gsd-sdk` query invocations in shell fences without a `command -v gsd-sdk`
- *         guard in the same fence (WORKFLOW_MISSING_SDK_FALLBACK — #3668).
- *   Both checks populate result.details with counters but do NOT return a failure
- *   code by default; they are informational until the upstream fixes land.
+ * Workflow-body checks (Cycle 3 — informational):
+ *   - Scans all installed gsd-core/workflows/*.md for /gsd:<known-cmd>
+ *     colon-namespace leaks (WORKFLOW_BODY_COLON_LEAK).
+ *   This check populates result.details with counters but does NOT return a
+ *   failure code by default; it is informational until enforcement is enabled.
  */
 
 'use strict';
@@ -51,7 +45,23 @@ const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const CHILD_TIMEOUT_MS = 120000;
+const { PACKAGE_NAME } = require('../gsd-core/bin/lib/package-identity.cjs');
+const { ExitError, runMain } = require('./lib/cli-exit.cjs');
+// 120 s proved too tight on Windows GitHub-hosted runners: cold-cache
+// `npm install -g` with a 1499-file tarball took ~120 s exactly, causing
+// spawnSync to fire SIGTERM and return { status: null, stdout: '', stderr: '' }
+// (Node docs: status is null when subprocess terminated due to a signal).
+// The INSTALL_FAILED branch checks `status !== 0`, which null satisfies, so the
+// test saw empty stdout/stderr and a spurious INSTALL_FAILED. Windows runners
+// are slower than Linux/macOS for filesystem-heavy operations (
+// https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+// ). Raise to 600 s (the same ceiling the before() helper uses for pack+install).
+const CHILD_TIMEOUT_MS = process.platform === 'win32' ? 600_000 : 120_000;
+const QUIET_NPM_ENV = Object.freeze({
+  npm_config_loglevel: 'error',
+  npm_config_update_notifier: 'false',
+  NO_UPDATE_NOTIFIER: '1',
+});
 
 // ---------------------------------------------------------------------------
 // Frozen result-code enum
@@ -67,59 +77,106 @@ const SMOKE = Object.freeze({
   COMMAND_FILE_MISSING: 'command_file_missing',
   WORKFLOW_FILE_MISSING: 'workflow_file_missing',
   INIT_FAILED: 'init_failed',
-  // Cycle 3 codes
-  SDK_BINARY_NOT_CALLABLE: 'sdk_binary_not_callable',
+  // Cycle 3 code
   WORKFLOW_BODY_COLON_LEAK: 'workflow_body_colon_leak',
-  WORKFLOW_MISSING_SDK_FALLBACK: 'workflow_missing_sdk_fallback',
 });
+
+// ---------------------------------------------------------------------------
+// Exported helper: binInvocation
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the { command, args, shell } descriptor needed to spawn an installed
+ * npm bin correctly on both Windows and POSIX.
+ *
+ * On Windows, npm installs a `.cmd` (or `.bat`) shim in .bin/.  Node ≥18.20.2
+ * / ≥20.12.2 throws EINVAL when you try to spawnSync a .cmd/.bat without
+ * shell:true (CVE-2024-27980 mitigation).  With shell:true, Node does NOT
+ * auto-quote argv, so a bin path that contains spaces must be wrapped in
+ * double-quotes to arrive at the shell as one token.
+ *
+ * On POSIX the bin is a regular shebang JS file; we invoke it directly via
+ * process.execPath (the same Node binary) without a shell.
+ *
+ * @param {string}   binPath  - Absolute path to the resolved bin file.
+ * @param {string[]} [args]   - Additional arguments (e.g. ['--help']).
+ * @returns {{ command: string, args: string[], shell: boolean }}
+ */
+function binInvocation(binPath, args = []) {
+  const lower = binPath.toLowerCase();
+  // Note: .ps1 shims are intentionally NOT handled here.  The bin-resolution
+  // helpers (findGsdToolsBin / findInstallerBin) only ever surface a .cmd path
+  // on Windows — npm does not write .ps1 shims into .bin/ by default — so a
+  // .ps1 path never reaches this function in practice.
+  if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
+    // Quote the path if it contains a space so the Windows shell treats it as
+    // a single token.  Simple double-quote wrap is sufficient because npm-
+    // generated shim paths don't contain embedded double-quotes.
+    const command = binPath.includes(' ') ? `"${binPath}"` : binPath;
+    return { command, args: [...args], shell: true };
+  }
+  // POSIX: invoke via node, no shell needed.
+  return { command: process.execPath, args: [binPath, ...args], shell: false };
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Locate the lib/node_modules/get-shit-done-cc package root inside an
- * npm --prefix install directory.
+ * Locate the lib/node_modules/@opengsd/gsd-core package root inside
+ * an npm --prefix install directory.
  */
 function pkgRoot(installPrefix) {
-  // POSIX: <prefix>/lib/node_modules/get-shit-done-cc
-  // Windows: <prefix>/node_modules/get-shit-done-cc
-  const posix = path.join(installPrefix, 'lib', 'node_modules', 'get-shit-done-cc');
-  const win = path.join(installPrefix, 'node_modules', 'get-shit-done-cc');
+  // POSIX: <prefix>/lib/node_modules/<scope>/<pkg>
+  // Windows: <prefix>/node_modules/<scope>/<pkg>
+  // PACKAGE_NAME is scoped (@scope/pkg), so split('/') yields the two path segments.
+  const pkgSegments = PACKAGE_NAME.split('/');
+  const posix = path.join(installPrefix, 'lib', 'node_modules', ...pkgSegments);
+  const win = path.join(installPrefix, 'node_modules', ...pkgSegments);
   return fs.existsSync(posix) ? posix : win;
 }
 
 /**
- * Locate the installed gsd-sdk binary (symlink in <prefix>/bin/).
+ * Return the ordered list of candidate paths to check when locating an npm
+ * global bin named `name` under `installPrefix`.
+ *
+ * On Windows, `npm install -g --prefix X` writes shims (*.cmd, *.ps1, bare)
+ * to the PREFIX ROOT (X\), NOT to X\node_modules\.bin\.  We therefore probe
+ * the prefix root first, then fall back to node_modules\.bin in case a
+ * non-standard layout puts them there.
+ *
+ * On POSIX the shim lands in <prefix>/bin/ as a symlink; only one candidate.
  */
-function findGsdSdkBin(installPrefix) {
-  const binDir = process.platform === 'win32'
-    ? path.join(installPrefix, 'node_modules', '.bin')
-    : path.join(installPrefix, 'bin');
+function binCandidates(installPrefix, name) {
+  if (process.platform === 'win32') {
+    return [
+      // npm global --prefix on Windows writes shims to the prefix ROOT
+      path.join(installPrefix, `${name}.cmd`),
+      path.join(installPrefix, name),
+      // fallback: some layouts use node_modules/.bin
+      path.join(installPrefix, 'node_modules', '.bin', `${name}.cmd`),
+      path.join(installPrefix, 'node_modules', '.bin', name),
+    ];
+  }
+  return [path.join(installPrefix, 'bin', name)];
+}
 
-  const candidates = process.platform === 'win32'
-    ? [path.join(binDir, 'gsd-sdk.cmd'), path.join(binDir, 'gsd-sdk')]
-    : [path.join(binDir, 'gsd-sdk')];
-
-  for (const c of candidates) {
+/**
+ * Locate the installed gsd-tools binary (symlink in <prefix>/bin/).
+ */
+function findGsdToolsBin(installPrefix) {
+  for (const c of binCandidates(installPrefix, 'gsd-tools')) {
     if (fs.existsSync(c)) return c;
   }
   return null;
 }
 
 /**
- * Locate the get-shit-done-cc installer binary (the symlink in <prefix>/bin/).
+ * Locate the gsd-core installer binary (the symlink in <prefix>/bin/).
  */
 function findInstallerBin(installPrefix) {
-  const binDir = process.platform === 'win32'
-    ? path.join(installPrefix, 'node_modules', '.bin')
-    : path.join(installPrefix, 'bin');
-
-  const candidates = process.platform === 'win32'
-    ? [path.join(binDir, 'get-shit-done-cc.cmd'), path.join(binDir, 'get-shit-done-cc')]
-    : [path.join(binDir, 'get-shit-done-cc')];
-
-  for (const c of candidates) {
+  for (const c of binCandidates(installPrefix, 'gsd-core')) {
     if (fs.existsSync(c)) return c;
   }
   return null;
@@ -131,15 +188,15 @@ function findInstallerBin(installPrefix) {
  * Structured parser — only inspects individual lines; never regexes on the
  * whole-file string. Two recognised forms (in priority order):
  *
- *   1. @-import line:  `@~/.claude/get-shit-done/workflows/<name>.md`
- *   2. Inline mention: any line containing `~/.claude/get-shit-done/workflows/<name>.md`
+ *   1. @-import line:  `@~/.claude/gsd-core/workflows/<name>.md`
+ *   2. Inline mention: any line containing `~/.claude/gsd-core/workflows/<name>.md`
  *      (takes the LAST occurrence so conditional-dispatch files resolve to the
  *       default / unconditional branch, e.g. discuss-phase.md)
  *
  * Returns the bare workflow filename (e.g. `"discuss-phase.md"`) or null.
  */
 function parseWorkflowRef(mdContent) {
-  const WORKFLOW_PREFIX = 'get-shit-done/workflows/';
+  const WORKFLOW_PREFIX = 'gsd-core/workflows/';
   let atImportResult = null;
   let lastInlineResult = null;
 
@@ -210,66 +267,6 @@ function scanWorkflowColonLeak(filePath, cmdNames) {
   return null;
 }
 
-/**
- * Scan a single workflow .md file for bare `gsd-sdk` query invocations inside
- * shell fences that lack a `command -v gsd-sdk` guard in the same fence.
- *
- * Structured check: walks lines, tracks open/close shell fences (```bash /
- * ```sh / ``` alone), collects `gsd-sdk` query lines and the fence's guard
- * state, then emits findings per-fence.
- *
- * Returns the first unguarded { line, lineNumber } or null.
- */
-function scanWorkflowMissingSdkFallback(filePath) {
-  const content = fs.readFileSync(filePath, 'utf-8');
-  const lines = content.split(/\r?\n/);
-
-  const FENCE_OPEN = /^```(?:bash|sh)?\s*$/;
-  const FENCE_CLOSE = /^```\s*$/;
-  const SDK_QUERY = /\bgsd-sdk\s+query\b/;
-  const COMMAND_V = /\bcommand\s+-v\s+gsd-sdk\b/;
-
-  let inFence = false;
-  let fenceHasGuard = false;
-  let firstSdkQueryLineInFence = null;
-  let firstSdkQueryLineNumInFence = null;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (!inFence) {
-      if (FENCE_OPEN.test(trimmed)) {
-        inFence = true;
-        fenceHasGuard = false;
-        firstSdkQueryLineInFence = null;
-        firstSdkQueryLineNumInFence = null;
-      }
-    } else {
-      if (FENCE_CLOSE.test(trimmed)) {
-        // Closing the fence — check if there were bare sdk query calls without a guard
-        if (firstSdkQueryLineInFence !== null && !fenceHasGuard) {
-          return { line: firstSdkQueryLineNumInFence, content: firstSdkQueryLineInFence.trim() };
-        }
-        inFence = false;
-        fenceHasGuard = false;
-        firstSdkQueryLineInFence = null;
-        firstSdkQueryLineNumInFence = null;
-      } else {
-        if (COMMAND_V.test(line)) {
-          fenceHasGuard = true;
-        }
-        if (SDK_QUERY.test(line) && firstSdkQueryLineInFence === null) {
-          firstSdkQueryLineInFence = line;
-          firstSdkQueryLineNumInFence = i + 1;
-        }
-      }
-    }
-  }
-
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // Pure function: runSmoke
 // ---------------------------------------------------------------------------
@@ -282,6 +279,10 @@ function scanWorkflowMissingSdkFallback(filePath) {
  * @param {string}   [opts.fixtureDir]       - Temp dir to run `init` into (must NOT be HOME)
  * @param {string[]} [opts.lifecycleCommands] - Commands to file-check (default: see below)
  * @param {boolean}  [opts.dryRun=false]     - If true, skip actual npm install; validate input only
+ * @param {object}   [opts.npmEnv]           - Optional env dict for the internal npm install
+ *   spawnSync call. Pass an isolated HOME env (e.g. from isolatedNpmEnv() in tests/helpers.cjs)
+ *   to prevent npm from reading/writing the caller's $HOME — required on Docker hosts where HOME
+ *   may be unwritable. Defaults to process.env. (#131)
  * @returns {{ code: string, details: object }}
  */
 function runSmoke({
@@ -291,6 +292,7 @@ function runSmoke({
   fixtureDir,
   lifecycleCommands = ['init', 'discuss-phase', 'plan-phase', 'execute-phase'],
   dryRun = false,
+  npmEnv = undefined,
 }) {
   const details = {
     tarball: tarballPath,
@@ -304,10 +306,14 @@ function runSmoke({
 
   // --- Install the tarball into the temp prefix ----------------------------
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  // Use the caller-supplied npmEnv if provided (allows HOME isolation on Docker
+  // hosts where HOME may be unwritable — same pattern as runNpm() in helpers.cjs).
+  // Falls back to process.env to preserve existing CLI / programmatic behaviour. (#131)
+  const effectiveNpmEnv = { ...(npmEnv !== undefined ? npmEnv : process.env), ...QUIET_NPM_ENV };
   const installResult = spawnSync(
     npmCmd,
     ['install', '-g', '--prefix', installPrefix, tarballPath],
-    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: CHILD_TIMEOUT_MS },
+    { encoding: 'utf-8', shell: process.platform === 'win32', timeout: CHILD_TIMEOUT_MS, env: effectiveNpmEnv },
   );
 
   if (installResult.status !== 0) {
@@ -317,28 +323,33 @@ function runSmoke({
         ...details,
         stderr: installResult.stderr,
         stdout: installResult.stdout,
+        // Expose signal + error so a timeout (status=null, signal='SIGTERM',
+        // stdout='', stderr='') is immediately diagnosable in CI logs.
+        signal: installResult.signal ?? null,
+        installError: installResult.error ? String(installResult.error) : null,
       },
     };
   }
 
-  // --- Locate the installed gsd-sdk binary ---------------------------------
-  const actualBin = findGsdSdkBin(installPrefix);
+  // --- Locate the installed gsd-tools binary --------------------------------
+  const actualBin = findGsdToolsBin(installPrefix);
 
   if (!actualBin) {
-    const binDir = process.platform === 'win32'
-      ? path.join(installPrefix, 'node_modules', '.bin')
-      : path.join(installPrefix, 'bin');
+    const searched = binCandidates(installPrefix, 'gsd-tools');
     return {
       code: SMOKE.BIN_NOT_CALLABLE,
-      details: { ...details, binDir, searched: [] },
+      details: { ...details, searched },
     };
   }
 
-  // --- Invoke `gsd-sdk --version` ------------------------------------------
+  // --- Invoke `gsd-tools --help` to assert the shipped binary is callable ---
+  // Use effectiveNpmEnv so the installed binary sees an isolated HOME on Docker
+  // hosts where HOME may be unwritable (same isolation as the npm install). (#131)
+  const versionInvocation = binInvocation(actualBin, ['--help']);
   const versionResult = spawnSync(
-    process.execPath,
-    [actualBin, '--version'],
-    { encoding: 'utf-8', timeout: CHILD_TIMEOUT_MS },
+    versionInvocation.command,
+    versionInvocation.args,
+    { encoding: 'utf-8', timeout: CHILD_TIMEOUT_MS, env: effectiveNpmEnv, shell: versionInvocation.shell },
   );
 
   if (versionResult.status !== 0) {
@@ -353,14 +364,14 @@ function runSmoke({
     };
   }
 
-  // Output format: "gsd-sdk v1.50.0-canary.0\n"
-  const rawOutput = (versionResult.stdout || '').trim();
-  const versionMatch = rawOutput.match(/v(.+)$/);
-  const installedVersion = versionMatch ? versionMatch[1] : rawOutput;
+  // Source of truth for shipped version is the installed package.json.
+  const installedPkgPath = path.join(pkgRoot(installPrefix), 'package.json');
+  const installedPkg = JSON.parse(fs.readFileSync(installedPkgPath, 'utf-8'));
+  const installedVersion = String(installedPkg.version || '').trim();
 
   details.version = installedVersion;
-  details.rawVersionOutput = rawOutput;
   details.bin = actualBin;
+  details.installedPackageJson = installedPkgPath;
 
   if (installedVersion !== expectedVersion) {
     return {
@@ -380,13 +391,12 @@ function runSmoke({
   // --- Run init if requested -----------------------------------------------
   if (shouldRunInit && fixtureDir) {
     const installerBin = findInstallerBin(installPrefix);
-
     if (!installerBin) {
       return {
         code: SMOKE.INIT_FAILED,
         details: {
           ...details,
-          reason: 'get-shit-done-cc binary not found in installPrefix',
+          reason: 'gsd-core binary not found in installPrefix',
           installPrefix,
         },
       };
@@ -399,9 +409,10 @@ function runSmoke({
     const initEnv = { ...process.env };
     delete initEnv.GSD_TEST_MODE;
 
+    const initInvocation = binInvocation(installerBin, ['--local', '--claude']);
     const initResult = spawnSync(
-      process.execPath,
-      [installerBin, '--local', '--claude'],
+      initInvocation.command,
+      initInvocation.args,
       {
         encoding: 'utf-8',
         cwd: fixtureDir,
@@ -409,6 +420,7 @@ function runSmoke({
         stdio: ['pipe', 'pipe', 'pipe'],
         env: initEnv,
         timeout: CHILD_TIMEOUT_MS,
+        shell: initInvocation.shell,
       },
     );
 
@@ -427,7 +439,7 @@ function runSmoke({
     // Verify expected dirs were created
     const expectedDirs = [
       path.join(fixtureDir, '.claude', 'commands'),
-      path.join(fixtureDir, '.claude', 'get-shit-done'),
+      path.join(fixtureDir, '.claude', 'gsd-core'),
     ];
     for (const dir of expectedDirs) {
       if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
@@ -466,9 +478,9 @@ function runSmoke({
 
     let workflowPath = null;
     if (workflowName) {
-      // Workflow files live at get-shit-done/workflows/<name> in the package.
+      // Workflow files live at gsd-core/workflows/<name> in the package.
       // Some live in subdirectories; try flat first then scan once.
-      const flat = path.join(pkg, 'get-shit-done', 'workflows', workflowName);
+      const flat = path.join(pkg, 'gsd-core', 'workflows', workflowName);
       workflowPath = fs.existsSync(flat) ? flat : null;
 
       if (!workflowPath) {
@@ -493,62 +505,17 @@ function runSmoke({
   details.lifecycleResolved = lifecycleResolved;
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Cycle 3: SDK binary callable + workflow-body validation (informational)
+  // Cycle 3: workflow-body validation (informational)
   // ─────────────────────────────────────────────────────────────────────────
 
-  // --- Verify `gsd-sdk` query is callable and returns parseable JSON -------
-  const sdkQueryDir = fixtureDir || os.tmpdir();
-  const sdkQueryResult = spawnSync(
-    process.execPath,
-    [actualBin, 'query', 'state.json', '--project-dir', sdkQueryDir],
-    { encoding: 'utf-8', timeout: CHILD_TIMEOUT_MS },
-  );
-
-  if (sdkQueryResult.status !== 0) {
-    return {
-      code: SMOKE.SDK_BINARY_NOT_CALLABLE,
-      details: {
-        ...details,
-        sdkBin: actualBin,
-        sdkQueryStderr: sdkQueryResult.stderr,
-        sdkQueryStdout: sdkQueryResult.stdout,
-      },
-    };
-  }
-
-  let sdkQueryParsed = false;
-  try {
-    JSON.parse(sdkQueryResult.stdout);
-    sdkQueryParsed = true;
-  } catch {
-    // leave sdkQueryParsed = false
-  }
-
-  if (!sdkQueryParsed) {
-    return {
-      code: SMOKE.SDK_BINARY_NOT_CALLABLE,
-      details: {
-        ...details,
-        sdkBin: actualBin,
-        reason: 'gsd-sdk query-state output is not valid JSON',
-        sdkQueryStdout: sdkQueryResult.stdout,
-      },
-    };
-  }
-
-  details.sdkQueryResult = sdkQueryResult.stdout;
-  details.sdkQueryParsed = true;
-
   // --- Workflow-body checks (informational — #3668 not yet fixed) ----------
-  const workflowsDir = path.join(pkg, 'get-shit-done', 'workflows');
+  const workflowsDir = path.join(pkg, 'gsd-core', 'workflows');
   const installedCmdNames = readInstalledCmdNames(pkg);
 
   let workflowsScanned = 0;
   let colonLeakCount = 0;
-  let missingFallbackCount = 0;
-  // Store first finding per check type (for future enforcement mode)
+  // Store first finding for potential future enforcement mode.
   let firstColonLeak = null;
-  let firstMissingFallback = null;
 
   if (fs.existsSync(workflowsDir)) {
     // Collect all .md files (flat only — subdirs contain sub-workflows that
@@ -567,26 +534,15 @@ function runSmoke({
         }
       }
 
-      const missingFallback = scanWorkflowMissingSdkFallback(filePath);
-      if (missingFallback) {
-        missingFallbackCount++;
-        if (!firstMissingFallback) {
-          firstMissingFallback = { file: filePath, line: missingFallback.line };
-        }
-      }
     }
   }
 
   details.workflowsScanned = workflowsScanned;
   details.colonLeakCount = colonLeakCount;
-  details.missingFallbackCount = missingFallbackCount;
   if (firstColonLeak) details.firstColonLeak = firstColonLeak;
-  if (firstMissingFallback) details.firstMissingFallback = firstMissingFallback;
 
-  // NOTE: colonLeakCount and missingFallbackCount are informational here.
-  // They will be non-zero against current main per #3668 and the /gsd: leak
-  // backlog. Once those issues are fixed, a future enforcement mode can be
-  // enabled (e.g. SMOKE_ENFORCE_WORKFLOW_BODY=1) to fail here.
+  // NOTE: colonLeakCount is informational here. Once the backlog is fixed,
+  // a future enforcement mode can fail on non-zero counts.
 
   return { code: SMOKE.OK, details };
 }
@@ -619,6 +575,7 @@ function cliMain() {
         encoding: 'utf-8',
         shell: process.platform === 'win32',
         timeout: CHILD_TIMEOUT_MS,
+        env: { ...process.env, ...QUIET_NPM_ENV },
       },
     ).trim();
     // npm pack outputs the filename on stdout (last line when verbose)
@@ -637,23 +594,24 @@ function cliMain() {
         };
         if (isJson) process.stdout.write(JSON.stringify(result) + '\n');
         cleanup(packDir, installPrefix, fixtureDir);
-        process.exit(1);
+        throw new ExitError(1);
       }
     }
   } catch (err) {
+    if (err instanceof ExitError) throw err;
     const result = {
       code: SMOKE.PACK_FAILED,
       details: { error: err.message, stderr: err.stderr },
     };
     if (isJson) process.stdout.write(JSON.stringify(result) + '\n');
     cleanup(packDir, installPrefix, fixtureDir);
-    process.exit(1);
+    throw new ExitError(1);
   }
 
   const result = runSmoke({ tarballPath, installPrefix, expectedVersion, fixtureDir });
   if (isJson) process.stdout.write(JSON.stringify(result) + '\n');
   cleanup(packDir, installPrefix, fixtureDir);
-  process.exit(result.code === SMOKE.OK ? 0 : 1);
+  return result.code === SMOKE.OK ? 0 : 1;
 }
 
 function cleanup(...dirs) {
@@ -670,8 +628,8 @@ function cleanup(...dirs) {
 // Exports
 // ---------------------------------------------------------------------------
 
-module.exports = { SMOKE, runSmoke };
+module.exports = { SMOKE, runSmoke, binInvocation };
 
 if (require.main === module) {
-  cliMain();
+  runMain(cliMain);
 }

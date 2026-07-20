@@ -31,7 +31,7 @@ const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
 
 const AGENTS_DIR = path.join(__dirname, '..', 'agents');
 const COMMANDS_DIR = path.join(__dirname, '..', 'commands', 'gsd');
-const WORKFLOWS_DIR = path.join(__dirname, '..', 'get-shit-done', 'workflows');
+const WORKFLOWS_DIR = path.join(__dirname, '..', 'gsd-core', 'workflows');
 
 /**
  * Parse top-level (non-nested, non-escaped) Skill() invocations from a workflow .md file.
@@ -169,7 +169,7 @@ function parseSkillCallBody(body) {
 }
 
 // Plugin directory resolution (cross-platform safe)
-const PLUGIN_WORKFLOWS_DIR = process.env.GSD_PLUGIN_ROOT || path.join(os.homedir(), '.claude', 'get-shit-done', 'workflows');
+const PLUGIN_WORKFLOWS_DIR = process.env.GSD_PLUGIN_ROOT || path.join(os.homedir(), '.claude', 'gsd-core', 'workflows');
 const PLUGIN_AVAILABLE = fs.existsSync(PLUGIN_WORKFLOWS_DIR);
 
 // --- CR-AGENT: code review agent frontmatter ---
@@ -462,11 +462,18 @@ describe('CR-INTEGRATION: workflow integration points', () => {
       'execute-phase.md missing code_review_gate step name');
   });
 
-  test('execute-phase.md contains config-get workflow.code_review', { skip: !PLUGIN_AVAILABLE ? 'Plugin dir not installed' : false }, () => {
-    const content = fs.readFileSync(path.join(PLUGIN_WORKFLOWS_DIR, 'execute-phase.md'), 'utf-8');
+  test('execute-phase.md resolves code-review capability hook', () => {
+    const content = fs.readFileSync(path.join(WORKFLOWS_DIR, 'execute-phase.md'), 'utf-8');
+    const gateMatch = content.match(/<step name="code_review_gate"[^>]*>([\s\S]*?)<\/step>/);
+    assert.ok(gateMatch, 'execute-phase.md missing code_review_gate step');
+    const gateContent = gateMatch[1];
 
-    assert.match(content, /config-get\s+workflow\.code_review/,
-      'execute-phase.md missing config-get workflow.code_review call');
+    assert.ok(gateContent.includes('loop render-hooks execute:post'),
+      'execute-phase.md code_review_gate must resolve execute:post capability hooks');
+    assert.ok(gateContent.includes('ref.skill == "code-review"'),
+      'execute-phase.md code_review_gate must identify the code-review capability hook');
+    assert.ok(!gateContent.match(/config-get\s+workflow\.code_review/),
+      'execute-phase.md code_review_gate must not read workflow.code_review directly');
   });
 
   test('execute-phase.md does NOT contain ls.*REVIEW.md.*head pattern', { skip: !PLUGIN_AVAILABLE ? 'Plugin dir not installed' : false }, () => {
@@ -488,11 +495,19 @@ describe('CR-INTEGRATION: workflow integration points', () => {
       'quick.md missing code-review invocation');
   });
 
-  test('quick.md contains config-get workflow.code_review', { skip: !PLUGIN_AVAILABLE ? 'Plugin dir not installed' : false }, () => {
-    const content = fs.readFileSync(path.join(PLUGIN_WORKFLOWS_DIR, 'quick.md'), 'utf-8');
+  test('quick.md resolves code-review capability hook', () => {
+    const content = fs.readFileSync(path.join(WORKFLOWS_DIR, 'quick.md'), 'utf-8');
+    const start = content.indexOf('**Step 6.25: Code review (auto)**');
+    const end = content.indexOf('**Step 6.5: Verification', start);
+    assert.ok(start !== -1 && end !== -1, 'quick.md missing Step 6.25 code review section');
+    const reviewContent = content.slice(start, end);
 
-    assert.match(content, /config-get\s+workflow\.code_review/,
-      'quick.md missing config-get workflow.code_review call');
+    assert.ok(reviewContent.includes('loop render-hooks execute:post'),
+      'quick.md code review step must resolve execute:post capability hooks');
+    assert.ok(reviewContent.includes('ref.skill == "code-review"'),
+      'quick.md code review step must identify the code-review capability hook');
+    assert.ok(!reviewContent.match(/config-get\s+workflow\.code_review/),
+      'quick.md code review step must not read workflow.code_review directly');
   });
 
   // autonomous.md tests read from the repo's canonical workflow source (WORKFLOWS_DIR),
@@ -557,3 +572,184 @@ describe('CR-INTEGRATION: workflow integration points', () => {
       `autonomous.md gsd-code-review-fix args missing --auto flag; got args="${fixInvocation.args}"`);
   });
 });
+
+
+// ────────────────────────────────────────────────────────────────────────
+// Folded from tests/bug-2839-review-fix-transactional-cleanup.test.cjs — consolidation epic #1969 (B8 #1977)
+// ────────────────────────────────────────────────────────────────────────
+{
+  const { describe: __foldDescribe } = require('node:test');
+  __foldDescribe("folded:bug-2839-review-fix-transactional-cleanup (consolidation epic #1969 B8 #1977)", () => {
+/**
+ * Regression test for bug #2839
+ *
+ * /gsd-code-review-fix cleanup tail is non-transactional. If the agent is
+ * interrupted (system restart, OOM kill) AFTER the last fix commit but
+ * BEFORE `git worktree remove`, the worktree is orphaned in
+ * `git worktree list`, the agent's branch is left with unmerged commits,
+ * and STATE.md is never advanced. To anyone reading main only, the phase
+ * looks "ready to plan" while critical fixes sit on a dangling branch.
+ *
+ * Fix: introduce a recovery sentinel JSON at
+ *   ${PHASE_DIR}/.review-fix-recovery-pending.json
+ * The sentinel is written AFTER `git worktree add` succeeds and
+ * REMOVED only after `git worktree remove` completes, so the cleanup
+ * tail is transactional from the orchestrator's perspective. If the
+ * process dies in between, the sentinel is left behind pointing at the
+ * orphan worktree and branch — a future run, /gsd-resume-work, or
+ * /gsd-progress can detect and complete the recovery.
+ */
+
+'use strict';
+
+// allow-test-rule: source-text-is-the-product (see #2839)
+// The gsd-code-fixer agent's working instructions ARE the product — Claude
+// follows them at runtime. Structural assertions over the markdown source
+// test the deployed contract. See bug-2686 for the same pattern.
+
+const { describe, test, before } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+
+const { parseFrontmatter } = require('./helpers.cjs');
+
+const SENTINEL_NAME = '.review-fix-recovery-pending.json';
+
+function extractStep(content, stepName) {
+  const re = new RegExp(`<step\\s+name="${stepName}">([\\s\\S]*?)</step>`);
+  const m = content.match(re);
+  return m ? m[1] : null;
+}
+
+describe('bug-2839: /gsd-code-review-fix cleanup is transactional', () => {
+  let agentPath;
+  let agentContent;
+  let frontmatter;
+
+  before(() => {
+    agentPath = path.join(__dirname, '..', 'agents', 'gsd-code-fixer.md');
+    assert.ok(fs.existsSync(agentPath), 'agents/gsd-code-fixer.md must exist');
+    agentContent = fs.readFileSync(agentPath, 'utf-8');
+    frontmatter = parseFrontmatter(agentContent);
+    assert.ok(frontmatter, 'agent must have YAML frontmatter');
+  });
+
+  test('agent declares a recovery sentinel filename', () => {
+    assert.ok(
+      agentContent.includes(SENTINEL_NAME),
+      `gsd-code-fixer.md must reference the recovery sentinel ${SENTINEL_NAME} so an interrupted cleanup tail is discoverable (#2839)`
+    );
+  });
+
+  test('sentinel is written inside setup_worktree, after git worktree add', () => {
+    const setupStep = extractStep(agentContent, 'setup_worktree');
+    assert.ok(setupStep, 'setup_worktree step must exist');
+
+    assert.ok(
+      setupStep.includes(SENTINEL_NAME),
+      `setup_worktree must reference ${SENTINEL_NAME} so the sentinel is created at the start of the run (#2839)`
+    );
+
+    const addPos = setupStep.indexOf('git worktree add');
+    assert.ok(addPos !== -1, 'setup_worktree must contain `git worktree add`');
+
+    // The sentinel WRITE (not just a reference) must come after `git worktree add`.
+    // Earlier references are allowed (e.g. recovery check for a stale sentinel
+    // from a prior interrupted run). Look for an explicit write — either a
+    // shell `>`/`>>` redirection, a `node -e` invocation that uses
+    // `fs.writeFileSync(...sentinel...)`, or a `Write` tool reference.
+    const writeIdx = (() => {
+      const candidates = [
+        /fs\.writeFileSync\([^)]*sentinel/,
+        />\s*"?\$sentinel/,
+        />\s*"?\$\{sentinel\}/,
+        /Write the recovery sentinel/i,
+      ];
+      let earliest = -1;
+      for (const re of candidates) {
+        const m = re.exec(setupStep);
+        if (m && (earliest === -1 || m.index < earliest)) earliest = m.index;
+      }
+      return earliest;
+    })();
+    assert.ok(
+      writeIdx !== -1,
+      'setup_worktree must explicitly describe writing the sentinel (#2839)'
+    );
+    assert.ok(
+      addPos < writeIdx,
+      'sentinel must be written AFTER `git worktree add` succeeds (#2839)'
+    );
+  });
+
+  test('sentinel records worktree path, branch, and padded_phase as JSON fields', () => {
+    for (const key of ['worktree_path', 'branch', 'padded_phase']) {
+      assert.ok(
+        agentContent.includes(key),
+        `recovery sentinel must record \`${key}\` so a future /gsd-resume-work or /gsd-progress can locate the orphan state (#2839)`
+      );
+    }
+  });
+
+  test('sentinel removal happens only AFTER git worktree remove succeeds', () => {
+    const setupStep = extractStep(agentContent, 'setup_worktree');
+    assert.ok(setupStep, 'setup_worktree step must exist');
+
+    const cleanupAnchor = setupStep.lastIndexOf('Cleanup tail (transactional');
+    assert.ok(cleanupAnchor !== -1, 'setup_worktree must document cleanup-tail section');
+    const cleanupSection = setupStep.slice(cleanupAnchor);
+
+    const removeIdx = cleanupSection.indexOf('git worktree remove "$wt" --force');
+    assert.ok(removeIdx !== -1, 'cleanup-tail must remove worktree');
+
+    // Within the cleanup-tail section, accept either a literal-filename form
+    // (`rm -f .../.review-fix-recovery-pending.json`) or a shell-variable form
+    // referring to the previously-declared `sentinel` variable
+    // (`rm -f "$sentinel"` / `rm -f "${sentinel}"`).
+    const escapedName = SENTINEL_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const sentinelRemovalRe = new RegExp(
+      `(rm\\s+(?:-f\\s+)?[^\\n]*(?:${escapedName}|\\$\\{?sentinel\\}?)|unlink[^\\n]*(?:${escapedName}|\\$\\{?sentinel\\}?))`
+    );
+    const sentinelRemovalMatch = sentinelRemovalRe.exec(cleanupSection);
+    assert.ok(
+      sentinelRemovalMatch,
+      `agent must remove the sentinel file (rm or unlink ${SENTINEL_NAME}) as part of the cleanup tail (#2839)`
+    );
+    const sentinelRemovalIdx = sentinelRemovalMatch.index;
+
+    assert.ok(
+      removeIdx < sentinelRemovalIdx,
+      'cleanup ordering must be: `git worktree remove` BEFORE sentinel removal (#2839)'
+    );
+  });
+
+  test('agent documents detection of pre-existing sentinel from a prior interrupted run', () => {
+    const lower = agentContent.toLowerCase();
+    const mentionsRecovery =
+      lower.includes('stale sentinel') ||
+      lower.includes('existing sentinel') ||
+      lower.includes('previous sentinel') ||
+      lower.includes('prior run') ||
+      lower.includes('pre-existing sentinel') ||
+      lower.includes('recovery');
+    assert.ok(
+      mentionsRecovery,
+      'agent must describe how it handles a pre-existing sentinel from a previous interrupted run (#2839)'
+    );
+  });
+
+  test('cleanup-tail obligation is documented as transactional / atomic', () => {
+    const lower = agentContent.toLowerCase();
+    const mentionsTransactional =
+      lower.includes('transactional') ||
+      lower.includes('atomic cleanup') ||
+      lower.includes('cleanup tail');
+    assert.ok(
+      mentionsTransactional,
+      'agent must document the cleanup tail as transactional/atomic (#2839)'
+    );
+  });
+});
+  });
+}

@@ -34,9 +34,9 @@ See **[CONTRIBUTING.md — "Proposing an ADR or PRD"](../../CONTRIBUTING.md#prop
 | [0002-command-contract-validation-module.md](0002-command-contract-validation-module.md) | Command Contract Validation Module | Accepted |
 | [0003-model-catalog-module.md](0003-model-catalog-module.md) | Model Catalog Module as single source of truth for agent profiles and runtime tier defaults | Accepted |
 | [0004-worktree-workstream-seam-module.md](0004-worktree-workstream-seam-module.md) | Planning Workspace Module as single seam for worktree and workstream state | Accepted |
-| [0005-sdk-architecture-seam-map.md](0005-sdk-architecture-seam-map.md) | SDK Architecture seam map for query/runtime surfaces | Accepted |
+| [0005-sdk-architecture-seam-map.md](0005-sdk-architecture-seam-map.md) | SDK Architecture seam map for query/runtime surfaces | Superseded by ADR-0174 |
 | [0006-planning-path-projection-module.md](0006-planning-path-projection-module.md) | Planning Path Projection Module for SDK query handlers | Accepted |
-| [0007-sdk-package-seam-module.md](0007-sdk-package-seam-module.md) | SDK Package Seam Module owns SDK-to-get-shit-done-cc compatibility | Accepted |
+| [0007-sdk-package-seam-module.md](0007-sdk-package-seam-module.md) | SDK Package Seam Module owns SDK-to-get-shit-done-redux compatibility | Superseded by ADR-0174 |
 | [0008-installer-migration-module.md](0008-installer-migration-module.md) | Installer Migration Module owns install-time upgrade safety | Accepted |
 | [0009-shell-command-projection-module.md](0009-shell-command-projection-module.md) | Shell Command Projection Module owns runtime-aware OS command rendering | Accepted |
 | [0010-file-operation-engine-module.md](0010-file-operation-engine-module.md) | File Operation Engine Module owns safe runtime/config file mutations | Proposed |
@@ -44,9 +44,32 @@ See **[CONTRIBUTING.md — "Proposing an ADR or PRD"](../../CONTRIBUTING.md#prop
 | [0011-skill-surface-budget-module.md](0011-skill-surface-budget-module.md) | Skill Surface Budget Module owns install-time profile staging and runtime surface control | Accepted |
 | [0011-review-default-reviewers.md](0011-review-default-reviewers.md) | Review default-reviewers selection policy for /gsd:review | Accepted |
 | [0011-review-default-reviewers-prd.md](0011-review-default-reviewers-prd.md) | PRD for review.default_reviewers feature (#3464) | Reference |
-| [0012-command-routing-hub.md](0012-command-routing-hub.md) | CommandRoutingHub as single dispatch seam for CJS command families | Accepted |
-| [3524-cjs-sdk-hard-seam.md](3524-cjs-sdk-hard-seam.md) | CJS↔SDK hard seam — single canonical owner per responsibility (#3524) | Proposed |
-| [3660-runtime-artifact-layout-module.md](3660-runtime-artifact-layout-module.md) | Runtime Artifact Layout Module owns per-runtime artifact placement | Proposed |
+| [0012-command-routing-hub.md](0012-command-routing-hub.md) | CommandRoutingHub as single dispatch seam for CJS command families | Superseded by ADR-0174 |
+| [15-autonomous-cross-ai-convergence.md](15-autonomous-cross-ai-convergence.md) | Cross-AI plan convergence via existing orchestration commands | Proposed |
+| [22-plan-drift-guard.md](22-plan-drift-guard.md) | Plan-vs-codebase drift guard: defaults and symbol-resolver seam | Proposed |
+| [3524-cjs-sdk-hard-seam.md](3524-cjs-sdk-hard-seam.md) | CJS↔SDK hard seam — single canonical owner per responsibility (#3524) | Superseded by ADR-0174 |
+| [3660-runtime-artifact-layout-module.md](3660-runtime-artifact-layout-module.md) | Runtime Artifact Layout Module owns per-runtime artifact placement | Accepted |
+| [0174-retire-gsd-sdk-package-boundary.md](0174-retire-gsd-sdk-package-boundary.md) | Retire @opengsd/gsd-sdk package boundary — single-runtime collapse | Accepted |
+| [452-eslint-lint-harness.md](452-eslint-lint-harness.md) | Adopt standard ESLint flat-config lint harness; retire homegrown regex scanners | Accepted |
+| [456-test-rigor-architecture.md](456-test-rigor-architecture.md) | Test-rigor architecture — deterministic scheduling, antagonistic tier, typed-surface mandate, delete-bad-tests policy | Accepted |
+| [457-generated-cjs-single-source.md](457-generated-cjs-single-source.md) | Collapse hand-written CJS to generated single-source | Proposed |
+| [660-release-from-next-head.md](660-release-from-next-head.md) | Release from the head of next; immutable release tags; @next dist-tag as the RC surface | Proposed |
+| [58-runtime-install-policy-module.md](58-runtime-install-policy-module.md) | Runtime Install Policy Module owns the typed install-plan projection | Accepted |
+| [766-claude-code-plugin-manifest-module.md](766-claude-code-plugin-manifest-module.md) | Claude Code Plugin Manifest Module owns the projection of gsd-core surfaces onto the Claude Code plugin contract | Accepted |
+| [1016-runtime-capability-descriptor.md](1016-runtime-capability-descriptor.md) | Runtime Capability Descriptor | Accepted |
+| [1235-descriptor-driven-agent-conversion-migration.md](1235-descriptor-driven-agent-conversion-migration.md) | Migrate agent conversion to the descriptor-driven install path (parity + per-runtime cutover) | Proposed |
+| [1411-resolution-provenance.md](1411-resolution-provenance.md) | Resolution must report provenance, not fall open silently | Accepted |
+| [1508-runtime-artifact-conversion-module.md](1508-runtime-artifact-conversion-module.md) | Runtime Artifact Conversion Module owns per-runtime content rewriting | Accepted |
+| [1593-skill-mapping-converter-methodology.md](1593-skill-mapping-converter-methodology.md) | Skill mapping & converter methodology across runtimes | Accepted |
+| [1769-state-md-transition-module.md](1769-state-md-transition-module.md) | STATE.md Transition Module — intent-based transitions over scattered RMW callbacks | Proposed |
+| [1817-state-md-rebuild-derivability-contract.md](1817-state-md-rebuild-derivability-contract.md) | STATE.md rebuild — derivability contract (capstone 11th transition) | Accepted |
+| [2008-command-exit-zero-gate.md](2008-command-exit-zero-gate.md) | Generic gate-predicate evaluator with a `command-exit-zero` kind (#2008) | Accepted |
+| [1990-existing-code-onboarding.md](1990-existing-code-onboarding.md) | Existing Code Onboarding Module owns deterministic repo-state detection and onboarding route selection | Proposed |
+| [2121-phase-identifier-parsing-consolidation.md](2121-phase-identifier-parsing-consolidation.md) | Phase-identifier parsing consolidation — single canonical owner (phase-id.cts) + anti-divergence guard | Accepted |
+| [2143-markdown-table-and-mutation-consolidation.md](2143-markdown-table-and-mutation-consolidation.md) | Markdown table model, bounded mutation, and fail-loud consolidation (#1372 part 2) | Accepted |
+| [2164-statusline-scope-boundary.md](2164-statusline-scope-boundary.md) | Statusline draws its data boundary at local, read-only sources (no external/credentialed data) | Accepted |
+| [612-bracket-phase-id-convention.md](612-bracket-phase-id-convention.md) | Bracket phase-ID convention — lift the milestone into a `[PROJECT.MM]` prefix; terminal deprecation of M-NN | Proposed |
+| [2264-golden-parity-redesign.md](2264-golden-parity-redesign.md) | Redesign golden-install-parity: single-source manifest builder + split invariant | Proposed |
 
 ## Seam map
 
@@ -67,3 +90,10 @@ ADR 0011 documents the Skill Surface Budget Module for install-time skill/agent
 profile staging (`--profile=<name>`, `.gsd-profile` marker, `requires:` closure)
 and the Phase 2 runtime `/gsd:surface` command for cluster-level enable/disable
 without reinstall.
+
+ADR 1411 establishes the Resolution Provenance principle: context resolution
+(config loading, project-root anchoring, workstream resolution) must report its
+provenance rather than fall open silently to defaults. It is the resolution-side
+analog of ADR 227 (input-validation shape), binds the Config Loader Module,
+Project-Root Resolution Module, and I/O Module, and is the decision record for
+epic #1411 (phases P1–P4).

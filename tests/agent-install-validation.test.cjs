@@ -10,22 +10,27 @@
 const { test, describe, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { spawnSync } = require('node:child_process');
 const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
+const { installerEnv } = require('./helpers/install-shared.cjs');
 
 const AGENTS_DIR_NAME = 'agents';
-const MODEL_PROFILES = require('../get-shit-done/bin/lib/model-profiles.cjs').MODEL_PROFILES;
+const MODEL_PROFILES = require('../gsd-core/bin/lib/model-profiles.cjs').MODEL_PROFILES;
 const EXPECTED_AGENTS = Object.keys(MODEL_PROFILES);
+const ROOT = path.join(__dirname, '..');
+const INSTALL_SCRIPT = path.join(ROOT, 'bin', 'install.js');
 
 /**
  * Create a fake GSD install directory structure that mirrors what the installer
- * produces. gsd-tools.cjs lives at <configDir>/get-shit-done/bin/gsd-tools.cjs,
+ * produces. gsd-tools.cjs lives at <configDir>/gsd-core/bin/gsd-tools.cjs,
  * so the agents dir is at <configDir>/agents/.
  *
  * We use --cwd to point at the project, and GSD_INSTALL_DIR env to override
  * the agents directory location for testing.
  */
-function createAgentsDir(configDir, agentNames = []) {
+function _createAgentsDir(configDir, agentNames = []) {
   const agentsDir = path.join(configDir, AGENTS_DIR_NAME);
   fs.mkdirSync(agentsDir, { recursive: true });
   for (const name of agentNames) {
@@ -50,7 +55,7 @@ describe('init commands: agents_installed field (#1371)', () => {
     cleanup(tmpDir);
   });
 
-  // Point the SDK at the repo's agents/ dir (sibling of get-shit-done/) via the
+  // Point the SDK at the repo's agents/ dir (sibling of gsd-core/) via the
   // GSD_AGENTS_DIR override. The SDK side of init resolves agents from
   // GSD_AGENTS_DIR or the runtime config dir (~/.claude/agents for Claude); it
   // does NOT walk up from cwd like the CJS-era code did. Without this override
@@ -145,7 +150,7 @@ describe('validate health: agent installation check W010 (#1371)', () => {
   });
 
   test('health check reports healthy when agents are installed (repo layout)', () => {
-    // In the repo, agents/ exists as a sibling of get-shit-done/, so the
+    // In the repo, agents/ exists as a sibling of gsd-core/, so the
     // health check should find them via the gsd-tools.cjs path resolution
     const result = runGsdTools('validate health --raw', tmpDir);
     assert.ok(result.success, `Command failed: ${result.error}`);
@@ -236,6 +241,26 @@ describe('checkAgentsInstalled: Copilot .agent.md format (#1512)', () => {
       'missing_agents must be empty when all .agent.md files are present');
   });
 
+  test('agents_installed=true when agents exist as .toml (Codex format) (#278)', () => {
+    const agentsDir = path.join(tmpDir, 'codex-agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    for (const name of EXPECTED_AGENTS) {
+      fs.writeFileSync(
+        path.join(agentsDir, `${name}.toml`),
+        `name = "${name}"\ndescription = "Test agent"\n`
+      );
+    }
+
+    const result = runGsdTools('validate agents --raw', tmpDir, { GSD_AGENTS_DIR: agentsDir });
+    assert.ok(result.success, `Command failed: ${result.error}`);
+
+    const output = JSON.parse(result.output);
+    assert.strictEqual(output.agents_found, true,
+      'agents_found must be true when agents exist as .toml (Codex format)');
+    assert.deepStrictEqual(output.missing, [],
+      'missing must be empty when all agents exist as .toml');
+  });
+
   test('GSD_AGENTS_DIR env var overrides default agents directory', () => {
     // Create a custom agents dir in a subdirectory
     const customAgentsDir = path.join(tmpDir, 'custom-agents');
@@ -253,6 +278,76 @@ describe('checkAgentsInstalled: Copilot .agent.md format (#1512)', () => {
     // The custom dir path should be reported
     assert.strictEqual(output.agents_dir, customAgentsDir,
       'agents_dir must reflect GSD_AGENTS_DIR override');
+  });
+});
+
+// ─── Kimi agents/subagents detection (#743 review) ─────────────────────────
+
+describe('checkAgentsInstalled: Kimi agents/subagents layout', () => {
+  test('Kimi install is detected by init, validate agents, and health checks', () => {
+    const tmpDir = createTempProject('gsd-kimi-agent-status-project-');
+    const tmpConfig = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-kimi-agent-status-config-'));
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-kimi-agent-status-home-'));
+    const env = installerEnv({
+      HOME: tmpHome,
+      USERPROFILE: tmpHome,
+      KIMI_CONFIG_DIR: tmpConfig,
+    });
+
+    try {
+      const installResult = spawnSync(
+        process.execPath,
+        [INSTALL_SCRIPT, '--kimi', '--global', '--config-dir', tmpConfig, '--no-sdk'],
+        {
+          cwd: tmpDir,
+          encoding: 'utf8',
+          env,
+        },
+      );
+      assert.strictEqual(
+        installResult.status,
+        0,
+        `Kimi install failed\nstdout: ${installResult.stdout}\nstderr: ${installResult.stderr}`,
+      );
+
+      fs.writeFileSync(
+        path.join(tmpDir, '.planning', 'config.json'),
+        JSON.stringify({ runtime: 'kimi', model_profile: 'balanced' }, null, 2),
+      );
+
+      const initResult = runGsdTools('init new-workspace --raw', tmpDir, env);
+      assert.ok(initResult.success, `init failed: ${initResult.error}`);
+      const initOutput = JSON.parse(initResult.output);
+      assert.strictEqual(initOutput.agent_runtime, 'kimi');
+      assert.strictEqual(initOutput.agents_dir, path.join(tmpConfig, 'agents'));
+      assert.strictEqual(initOutput.agents_installed, true);
+      assert.deepStrictEqual(initOutput.missing_agents, []);
+
+      const validateResult = runGsdTools('validate agents --raw', tmpDir, {
+        ...env,
+        GSD_RUNTIME: 'kimi',
+      });
+      assert.ok(validateResult.success, `validate agents failed: ${validateResult.error}`);
+      const validateOutput = JSON.parse(validateResult.output);
+      assert.strictEqual(validateOutput.agents_dir, path.join(tmpConfig, 'agents'));
+      assert.strictEqual(validateOutput.agents_found, true);
+      assert.deepStrictEqual(validateOutput.missing, []);
+
+      const healthResult = runGsdTools('validate health --raw', tmpDir, {
+        ...env,
+        GSD_RUNTIME: 'kimi',
+      });
+      assert.ok(healthResult.success, `validate health failed: ${healthResult.error}`);
+      const healthOutput = JSON.parse(healthResult.output);
+      const agentWarnings = (healthOutput.warnings || []).filter(
+        (warning) => warning.code === 'W010' || /GSD agents/i.test(warning.message || ''),
+      );
+      assert.deepStrictEqual(agentWarnings, []);
+    } finally {
+      cleanup(tmpDir);
+      cleanup(tmpConfig);
+      cleanup(tmpHome);
+    }
   });
 });
 
@@ -287,5 +382,211 @@ describe('validate agents subcommand (#1371)', () => {
     const output = JSON.parse(result.output);
     // The expected agents come from MODEL_PROFILES keys
     assert.ok(output.expected.length > 0, 'Must have expected agents');
+  });
+});
+
+// ─── Bug #1058: validate agents detects manifest-backed .md/.toml pair drift ──
+
+describe('bug #1058: validate agents detects manifest-backed .md/.toml pair drift', () => {
+  // All real agents/gsd-*.md files in the repo (used to populate fixtures)
+  const REPO_AGENTS_DIR_1058 = path.resolve(__dirname, '..', 'agents');
+
+  /**
+   * Copy all gsd-*.md files from the repo agents dir into destDir.
+   */
+  function copyAgentMdFiles(destDir) {
+    const files = fs.readdirSync(REPO_AGENTS_DIR_1058).filter(f => /^gsd-.*\.md$/.test(f));
+    for (const file of files) {
+      const src = path.join(REPO_AGENTS_DIR_1058, file);
+      const dst = path.join(destDir, file);
+      fs.copyFileSync(src, dst);
+    }
+  }
+
+  /**
+   * Build a gsd-file-manifest.json whose files map includes both .md and .toml
+   * entries for every EXPECTED_AGENTS entry.
+   */
+  function buildManifestBothPairs(agents) {
+    const files = {};
+    for (const name of agents) {
+      files[`agents/${name}.md`] = 'deadbeef';
+      files[`agents/${name}.toml`] = 'deadbeef';
+    }
+    return { version: '1.0.0', files };
+  }
+
+  let tmpDir;
+
+  afterEach(() => {
+    if (tmpDir) {
+      cleanup(tmpDir);
+      tmpDir = null;
+    }
+  });
+
+  test('agents_found=false and incomplete non-empty when .toml files are absent but manifest expects them', () => {
+    // Arrange: all .md files present, manifest says both .md and .toml are expected,
+    // but NO .toml files are created on disk.
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-bug-1058-missing-toml-'));
+    const agentsDir = path.join(tmpDir, 'agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+
+    // Copy real .md files
+    copyAgentMdFiles(agentsDir);
+
+    // Write manifest with both .md and .toml entries but no .toml files on disk
+    fs.writeFileSync(
+      path.join(tmpDir, 'gsd-file-manifest.json'),
+      JSON.stringify(buildManifestBothPairs(EXPECTED_AGENTS), null, 2),
+    );
+
+    // Act
+    const result = runGsdTools('validate agents --raw', tmpDir, {
+      GSD_RUNTIME: 'codex',
+      GSD_AGENTS_DIR: agentsDir,
+    });
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const output = JSON.parse(result.output);
+
+    // Assert: the completeness check must catch the missing .toml files
+    assert.strictEqual(
+      output.agents_found,
+      false,
+      `Expected agents_found=false when manifest-tracked .toml files are absent, got agents_found=${output.agents_found}`,
+    );
+    assert.ok(
+      Array.isArray(output.incomplete),
+      'Expected output.incomplete to be an array',
+    );
+    // Every agent whose .toml is absent must appear in incomplete (sorted deep-equal)
+    assert.deepStrictEqual(
+      [...output.incomplete].sort(),
+      [...EXPECTED_AGENTS].sort(),
+      `Expected incomplete to equal full EXPECTED_AGENTS set; got ${JSON.stringify(output.incomplete)}`,
+    );
+    // missing (entirely-absent .md) must be empty — these agents are not missing, only incomplete
+    assert.deepStrictEqual(
+      output.missing,
+      [],
+      `Expected missing=[] when all .md files are present; got ${JSON.stringify(output.missing)}`,
+    );
+  });
+
+  test('agents_found=false and incomplete non-empty when .md files are absent but manifest expects them', () => {
+    // Arrange: only .toml files present on disk, manifest says both .md and .toml are expected,
+    // but NO .md files exist. This is the opposite-side pair-drift case.
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-bug-1058-missing-md-'));
+    const agentsDir = path.join(tmpDir, 'agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+
+    // Create ONLY .toml files — deliberately skip .md files
+    for (const name of EXPECTED_AGENTS) {
+      fs.writeFileSync(path.join(agentsDir, `${name}.toml`), `name = "${name}"
+`);
+    }
+
+    // Write manifest with both .md and .toml entries
+    fs.writeFileSync(
+      path.join(tmpDir, 'gsd-file-manifest.json'),
+      JSON.stringify(buildManifestBothPairs(EXPECTED_AGENTS), null, 2),
+    );
+
+    // Act
+    const result = runGsdTools('validate agents --raw', tmpDir, {
+      GSD_RUNTIME: 'codex',
+      GSD_AGENTS_DIR: agentsDir,
+    });
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const output = JSON.parse(result.output);
+
+    // Assert: missing .md files must surface as incomplete (pair-drift detected symmetrically)
+    assert.strictEqual(
+      output.agents_found,
+      false,
+      `Expected agents_found=false when manifest-tracked .md files are absent, got agents_found=${output.agents_found}`,
+    );
+    assert.ok(
+      Array.isArray(output.incomplete),
+      'Expected output.incomplete to be an array',
+    );
+    assert.ok(
+      output.incomplete.length > 0,
+      `Expected incomplete to be non-empty when .md files are absent; got ${JSON.stringify(output.incomplete)}`,
+    );
+  });
+
+  test('agents_found=true and incomplete=[] when both .md and .toml files are present', () => {
+    // Arrange: all .md AND .toml present, manifest says both expected
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-bug-1058-complete-pair-'));
+    const agentsDir = path.join(tmpDir, 'agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+
+    // Copy real .md files
+    copyAgentMdFiles(agentsDir);
+
+    // Create .toml files for each expected agent
+    for (const name of EXPECTED_AGENTS) {
+      fs.writeFileSync(path.join(agentsDir, `${name}.toml`), `name = "${name}"\n`);
+    }
+
+    // Write manifest with both .md and .toml entries
+    fs.writeFileSync(
+      path.join(tmpDir, 'gsd-file-manifest.json'),
+      JSON.stringify(buildManifestBothPairs(EXPECTED_AGENTS), null, 2),
+    );
+
+    // Act
+    const result = runGsdTools('validate agents --raw', tmpDir, {
+      GSD_RUNTIME: 'codex',
+      GSD_AGENTS_DIR: agentsDir,
+    });
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const output = JSON.parse(result.output);
+
+    // Assert: complete pair => no false positive
+    assert.strictEqual(
+      output.agents_found,
+      true,
+      `Expected agents_found=true when both .md and .toml files are present; got ${output.agents_found}`,
+    );
+    assert.deepStrictEqual(
+      output.incomplete,
+      [],
+      `Expected incomplete=[] when all manifest-tracked files are present; got ${JSON.stringify(output.incomplete)}`,
+    );
+  });
+
+  test('no spurious incomplete flags when no manifest is present (protects claude/bundled installs)', () => {
+    // Arrange: all .md files present, NO manifest file at all
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-bug-1058-no-manifest-'));
+    const agentsDir = path.join(tmpDir, 'agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+
+    // Copy real .md files
+    copyAgentMdFiles(agentsDir);
+
+    // Explicitly do NOT write gsd-file-manifest.json
+
+    // Act
+    const result = runGsdTools('validate agents --raw', tmpDir, {
+      GSD_RUNTIME: 'codex',
+      GSD_AGENTS_DIR: agentsDir,
+    });
+    assert.ok(result.success, `Command failed: ${result.error}`);
+    const output = JSON.parse(result.output);
+
+    // Assert: without a manifest, completeness check must no-op (incomplete empty)
+    assert.deepStrictEqual(
+      output.incomplete,
+      [],
+      `Expected incomplete=[] when no manifest present; got ${JSON.stringify(output.incomplete)}`,
+    );
+    // agents_found should reflect plain file presence (all .md files copied => true)
+    assert.strictEqual(
+      output.agents_found,
+      true,
+      `Expected agents_found=true when all .md files are present and no manifest; got ${output.agents_found}`,
+    );
   });
 });

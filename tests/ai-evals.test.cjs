@@ -25,9 +25,9 @@ const { runGsdTools, createTempProject, cleanup } = require('./helpers.cjs');
 const REPO_ROOT      = path.join(__dirname, '..');
 const AGENTS_DIR     = path.join(REPO_ROOT, 'agents');
 const COMMANDS_DIR   = path.join(REPO_ROOT, 'commands', 'gsd');
-const WORKFLOWS_DIR  = path.join(REPO_ROOT, 'get-shit-done', 'workflows');
-const TEMPLATES_DIR  = path.join(REPO_ROOT, 'get-shit-done', 'templates');
-const REFERENCES_DIR = path.join(REPO_ROOT, 'get-shit-done', 'references');
+const WORKFLOWS_DIR  = path.join(REPO_ROOT, 'gsd-core', 'workflows');
+const TEMPLATES_DIR  = path.join(REPO_ROOT, 'gsd-core', 'templates');
+const REFERENCES_DIR = path.join(REPO_ROOT, 'gsd-core', 'references');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -360,12 +360,11 @@ describe('WORKFLOW: plan-phase.md AI nudge integration', () => {
     );
   });
 
-  test('plan-phase.md references workflow.ai_integration_phase config toggle', () => {
+  test('ai-integration capability owns workflow.ai_integration_phase config toggle', () => {
     const content = fs.readFileSync(planPhasePath, 'utf-8');
-    assert.ok(
-      content.includes('ai_integration_phase'),
-      'plan-phase.md should check workflow.ai_integration_phase config'
-    );
+    const registry = require('../gsd-core/bin/lib/capability-registry.cjs');
+    assert.strictEqual(registry.configKeys['workflow.ai_integration_phase'], 'ai-integration');
+    assert.doesNotMatch(content, /config-get workflow\.ai_integration_phase/);
   });
 });
 

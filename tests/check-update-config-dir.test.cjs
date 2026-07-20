@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: structural-regression-guard
+// Reads hook .js or bin/install.js source to assert structural invariants
+// (search array order, function wiring, path constants) that cannot be
+// verified by observing runtime outputs alone. Per CONTRIBUTING.md exception matrix.
 
 /**
  * Regression test for #1860: detectConfigDir in gsd-check-update.js should
@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
+const { cleanup } = require('./helpers.cjs');
 
 const CHECK_UPDATE_PATH = path.join(__dirname, '..', 'hooks', 'gsd-check-update.js');
 
@@ -60,17 +61,17 @@ describe('detectConfigDir runtime behavior (#1860)', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpHome, { recursive: true, force: true });
+    cleanup(tmpHome);
   });
 
   test('returns .claude config dir when both .claude and .config/opencode exist', () => {
     // Simulate OpenCode install with OLDER version
-    const openCodeVersionDir = path.join(tmpHome, '.config', 'opencode', 'get-shit-done');
+    const openCodeVersionDir = path.join(tmpHome, '.config', 'opencode', 'gsd-core');
     fs.mkdirSync(openCodeVersionDir, { recursive: true });
     fs.writeFileSync(path.join(openCodeVersionDir, 'VERSION'), '1.0.0\n');
 
     // Simulate Claude Code install with NEWER version
-    const claudeVersionDir = path.join(tmpHome, '.claude', 'get-shit-done');
+    const claudeVersionDir = path.join(tmpHome, '.claude', 'gsd-core');
     fs.mkdirSync(claudeVersionDir, { recursive: true });
     fs.writeFileSync(path.join(claudeVersionDir, 'VERSION'), '1.32.0\n');
 
@@ -86,7 +87,7 @@ describe('detectConfigDir runtime behavior (#1860)', () => {
     const hookSource = fs.readFileSync(CHECK_UPDATE_PATH, 'utf8');
 
     // Extract detectConfigDir function body (from 'function detectConfigDir' to the closing brace)
-    const fnMatch = hookSource.match(/(function detectConfigDir\(baseDir\)\s*\{[\s\S]*?\n\})/);
+    const fnMatch = hookSource.match(/(function detectConfigDir\(baseDir\)\s*\{[\s\S]*?\r?\n\})/);
     assert.ok(fnMatch, 'should be able to extract detectConfigDir function from hook source');
     const fnSource = fnMatch[1];
 
@@ -118,12 +119,12 @@ describe('detectConfigDir runtime behavior (#1860)', () => {
 
   test('falls back to .config/opencode when .claude does not exist', () => {
     // Only OpenCode installed
-    const openCodeVersionDir = path.join(tmpHome, '.config', 'opencode', 'get-shit-done');
+    const openCodeVersionDir = path.join(tmpHome, '.config', 'opencode', 'gsd-core');
     fs.mkdirSync(openCodeVersionDir, { recursive: true });
     fs.writeFileSync(path.join(openCodeVersionDir, 'VERSION'), '1.0.0\n');
 
     const hookSource = fs.readFileSync(CHECK_UPDATE_PATH, 'utf8');
-    const fnMatch = hookSource.match(/(function detectConfigDir\(baseDir\)\s*\{[\s\S]*?\n\})/);
+    const fnMatch = hookSource.match(/(function detectConfigDir\(baseDir\)\s*\{[\s\S]*?\r?\n\})/);
     assert.ok(fnMatch, 'should be able to extract detectConfigDir function from hook source');
     const fnSource = fnMatch[1];
 

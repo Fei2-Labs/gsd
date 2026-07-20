@@ -38,6 +38,7 @@
   - [모델 프로파일](#26-model-profiles)
 - [브라운필드 기능](#brownfield-features)
   - [코드베이스 매핑](#27-codebase-mapping)
+  - [기존 코드베이스 온보딩](#27b-existing-codebase-onboarding)
 - [유틸리티 기능](#utility-features)
   - [디버그 시스템](#28-debug-system)
   - [할 일 관리](#29-todo-management)
@@ -73,8 +74,6 @@
 - [v1.29 기능](#v129-기능)
   - [Windsurf 런타임 지원](#56-windsurf-런타임-지원)
   - [국제화 문서](#57-국제화-문서)
-- [v1.30 기능](#v130-기능)
-  - [GSD SDK](#58-gsd-sdk)
 - [v1.31 기능](#v131-기능)
   - [스키마 드리프트 감지](#59-스키마-드리프트-감지)
   - [보안 시행](#60-보안-시행)
@@ -718,7 +717,7 @@
 
 **명령어:** `/gsd-map-codebase [area]`
 
-**목적:** 새 프로젝트를 시작하기 전에 기존 코드베이스를 분석하여 GSD가 무엇이 존재하는지 이해하도록 합니다.
+**목적:** 새 프로젝트 시작 전 또는 `/gsd-onboard`의 매핑 handoff로 기존 코드베이스를 분석하여 GSD가 무엇이 존재하는지 이해하도록 합니다.
 
 **요구사항.**
 - REQ-MAP-01: 각 분석 영역에 대한 병렬 매퍼 에이전트를 생성해야 합니다.
@@ -737,6 +736,27 @@
 | `STRUCTURE.md` | 디렉토리 레이아웃과 파일 구성 |
 | `TESTING.md` | 테스트 인프라, 커버리지, 패턴 |
 | `INTEGRATIONS.md` | 외부 서비스, API, 서드파티 의존성 |
+
+### 27b. Existing Codebase Onboarding
+
+**명령어:** `/gsd-onboard [--fast] [--text]`
+
+**목적:** 기존 저장소의 최초 설정을 안내하고 brownfield 상태를 확인해 코드베이스 매핑, docs 수집, 프로젝트 초기화로 안전하게 handoff합니다.
+
+**요구사항.**
+- REQ-ONBOARD-01: 기존 코드, package manifest, planning 문서, 부분 `.planning/` 상태, 코드베이스 맵 누락을 감지해야 합니다.
+- REQ-ONBOARD-02: 필요한 `.planning/codebase/` 맵 파일이 없는 brownfield에서는 `/gsd-map-codebase` 또는 `/gsd-map-codebase --fast`로 handoff해야 합니다. fast 맵 readiness는 부분 상태이며 `/gsd-new-project`에 충분한 것으로 취급해서는 안 됩니다.
+- REQ-ONBOARD-03: ADR/PRD/SPEC/RFC 후보가 있고 project가 없으면 `/gsd-new-project` 전에 `/gsd-ingest-docs`를 제안해야 합니다.
+- REQ-ONBOARD-04: `PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`가 모두 있을 때까지 완료로 보고하지 않아야 합니다.
+- REQ-ONBOARD-05: project setup 후에만 `.planning/onboarding/SUMMARY.md`를 만들거나 확인해야 합니다.
+- REQ-ONBOARD-06: 대화형 메뉴가 없는 runtime을 위해 `--text` 번호형 plain-text gate를 지원해야 합니다.
+
+**생성 산출물.**
+| 산출물 | 설명 |
+|----------|-------------|
+| `.planning/codebase/` | `/gsd-map-codebase` handoff가 생성한 코드베이스 맵 |
+| `.planning/PROJECT.md`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md` | `/gsd-new-project` 또는 `/gsd-ingest-docs`가 생성한 planning setup |
+| `.planning/onboarding/SUMMARY.md` | Onboarding status, artifact index, next-command summary |
 
 ---
 
@@ -1047,9 +1067,9 @@ fix(03-01): correct auth token expiry
 
 ### 42. Cross-AI Peer Review
 
-**명령어:** `/gsd-review --phase N [--gemini] [--claude] [--codex] [--coderabbit] [--opencode] [--qwen] [--cursor] [--all]`
+**명령어:** `/gsd-review --phase N [--gemini] [--claude] [--codex] [--coderabbit] [--opencode] [--qwen] [--cursor] [--agy] [--all]`
 
-**목적:** 외부 AI CLI(Gemini, Claude, Codex, CodeRabbit, OpenCode, Qwen Code, Cursor)를 호출하여 페이즈 계획을 독립적으로 검토합니다. 검토자별 피드백이 담긴 구조화된 REVIEWS.md를 생성합니다.
+**목적:** 외부 AI CLI(Gemini, Claude, Codex, CodeRabbit, OpenCode, Qwen Code, Cursor, Antigravity)를 호출하여 페이즈 계획을 독립적으로 검토합니다. 검토자별 피드백이 담긴 구조화된 REVIEWS.md를 생성합니다.
 
 **요구사항.**
 - REQ-REVIEW-01: 시스템에서 사용 가능한 AI CLI를 감지해야 합니다.
@@ -1133,7 +1153,7 @@ fix(03-01): correct auth token expiry
 **3. 워크플로우 가드 훅** (`gsd-workflow-guard.js`)
 Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하는 것을 감지하는 PreToolUse 훅입니다. 직접 편집 대신 `/gsd-quick` 또는 `/gsd-fast` 사용을 권고합니다. `hooks.workflow_guard`로 구성 가능합니다(기본값: false).
 
-**4. CI 준비 주입 스캐너** (`prompt-injection-scan.test.cjs`)
+**4. CI 준비 주입 스캐너** (`prompt-injection-scan.security.test.cjs`)
 모든 에이전트, 워크플로우, 명령어 파일에서 포함된 주입 벡터를 스캔하는 테스트 스위트입니다.
 
 **요구사항.**
@@ -1308,7 +1328,7 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 
 ### 55. Multi-Runtime Installer Selection
 
-**일부:** `npx get-shit-done-cc`
+**일부:** `npx @opengsd/gsd-core`
 
 **목적:** 단일 대화형 설치 세션에서 여러 런타임을 선택합니다.
 
@@ -1327,7 +1347,7 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 
 ### 56. Windsurf 런타임 지원
 
-**대상:** `npx get-shit-done-cc`
+**대상:** `npx @opengsd/gsd-core`
 
 **목적:** Windsurf AI IDE 지원을 추가합니다.
 
@@ -1355,26 +1375,6 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 **프로세스.**
 1. **번역** — 핵심 문서를 대상 언어로 변환
 2. **게시** — 번역된 문서를 영어 원본과 함께 접근 가능하게 제공
-
----
-
-## v1.30 기능
-
-### 58. GSD SDK
-
-**명령어:** 프로그래매틱 API (헤드리스)
-
-**목적:** CLI 세션 없이 프로그래밍 방식으로 GSD 워크플로우를 실행하기 위한 헤드리스 TypeScript SDK.
-
-**요구사항.**
-- REQ-SDK-01: SDK는 GSD 워크플로우 작업을 TypeScript 함수로 노출해야 합니다.
-- REQ-SDK-02: SDK는 대화형 프롬프트 없이 헤드리스 실행을 지원해야 합니다.
-- REQ-SDK-03: SDK는 CLI 기반 워크플로우와 동일한 아티팩트를 생성해야 합니다.
-
-**프로세스.**
-1. **임포트** — TypeScript/JavaScript 프로젝트에 GSD SDK 임포트
-2. **구성** — 프로젝트 경로와 워크플로우 옵션을 프로그래밍 방식으로 설정
-3. **실행** — API 호출로 GSD 페이즈(discuss, plan, execute) 실행
 
 ---
 
@@ -1568,7 +1568,7 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 
 ### 68. Claude Code 스킬 마이그레이션
 
-**대상:** `npx get-shit-done-cc`
+**대상:** `npx @opengsd/gsd-core`
 
 **목적:** GSD 명령어를 하위 호환성을 유지하면서 Claude Code 2.1.88+ 스킬 형식으로 마이그레이션합니다.
 
@@ -1680,7 +1680,7 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 
 ### 74. 컨텍스트 축소
 
-**대상:** GSD SDK 프롬프트 어셈블리
+**대상:** 프롬프트 어셈블리 파이프라인
 
 **목적:** Markdown 절삭 및 캐시 친화적 프롬프트 순서를 통해 컨텍스트 프롬프트 크기를 줄입니다.
 
@@ -1831,7 +1831,7 @@ Claude가 GSD 워크플로우 컨텍스트 밖에서 파일 편집을 시도하�
 
 ### 85. 신규 런타임 지원 (Trae, Cline, Augment Code)
 
-**대상:** `npx get-shit-done-cc`
+**대상:** `npx @opengsd/gsd-core`
 
 **목적:** Trae IDE, Cline, Augment Code 런타임으로 GSD 설치를 확장합니다.
 

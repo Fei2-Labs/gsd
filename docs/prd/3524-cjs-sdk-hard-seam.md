@@ -1,8 +1,8 @@
 # PRD: CJS↔SDK hard seam — Shared-Module migration
 
-- **Status:** Reference
+- **Status:** Superseded by [ADR-0174](../adr/0174-retire-gsd-sdk-package-boundary.md) (2026-05-23) — historical migration plan; the CJS↔SDK seam and its hand-sync tooling were retired with the `@opengsd/gsd-sdk` package boundary
 - **Date:** 2026-05-14
-- **Tracking issue:** [#3524](https://github.com/gsd-build/get-shit-done/issues/3524)
+- **Tracking issue:** [#3524](https://github.com/open-gsd/gsd-core/issues/3524)
 - **Related ADR:** [`docs/adr/3524-cjs-sdk-hard-seam.md`](../adr/3524-cjs-sdk-hard-seam.md)
 
 ## Why this PRD exists
@@ -11,7 +11,7 @@ The ADR defines the target architecture — one source of truth per Shared Modul
 
 ## Problem statement
 
-The CJS↔SDK boundary in `gsd-build/get-shit-done` is structurally permeable. Multiple Shared Modules — STATE.md Document Module, Workstream Inventory Module, and several others — exist today as **hand-synced pairs** of `.cjs` and `.ts` files with character-identical implementations. Constants (`CONFIG_DEFAULTS`, `VALID_CONFIG_KEYS`) are likewise defined twice. The boundary is policed only by:
+The CJS↔SDK boundary in `open-gsd/gsd-core` is structurally permeable. Multiple Shared Modules — STATE.md Document Module, Workstream Inventory Module, and several others — exist today as **hand-synced pairs** of `.cjs` and `.ts` files with character-identical implementations. Constants (`CONFIG_DEFAULTS`, `VALID_CONFIG_KEYS`) are likewise defined twice. The boundary is policed only by:
 
 - A naming-parity test (`tests/config-schema-sdk-parity.test.cjs`)
 - Output-parity golden tests for read-only handlers (`sdk/src/golden/read-only-parity.integration.test.ts`)
@@ -41,7 +41,7 @@ The fix is mechanical: for every hand-synced pair, replace one side with a gener
 
 ## Approach
 
-The repo already has a working precedent for shared CJS/SDK Modules: `sdk/scripts/gen-command-aliases.ts` emits both `sdk/src/query/command-aliases.generated.ts` and `get-shit-done/bin/lib/command-aliases.generated.cjs` from a single TypeScript source. `sdk/scripts/check-command-aliases-fresh.mjs` is the CI freshness gate that fails when either generated file drifts from the source. This PRD generalizes that pattern to every Shared Module.
+The repo already has a working precedent for shared CJS/SDK Modules: `sdk/scripts/gen-command-aliases.ts` emits both `sdk/src/query/command-aliases.generated.ts` and `gsd-core/bin/lib/command-aliases.generated.cjs` from a single TypeScript source. `sdk/scripts/check-command-aliases-fresh.mjs` is the CI freshness gate that fails when either generated file drifts from the source. This PRD generalizes that pattern to every Shared Module.
 
 For each Shared Module being migrated:
 
@@ -62,11 +62,11 @@ Phases are sized to ship in one to two PRs each. Each phase has its own GitHub i
 
 ### Phase 1 — STATE.md Document Module (smallest possible proof)
 
-**Why first.** `bin/lib/state-document.cjs` and `sdk/src/query/state-document.ts` are already a character-identical hand-synced pair of pure transforms (the file headers explicitly say "Pure transforms for STATE.md text. This module does not read the filesystem and does not own persistence or locking."). Deletion test passes on contact: one side can be deleted as soon as the other becomes the generated artifact. This is the safest possible first step and the canonical proof that the generator pattern works for executable logic, not just alias tables.
+**Why first.** `bin/lib/state-document.cjs` and `sdk/src/state/index.ts` are already a character-identical hand-synced pair of pure transforms (the file headers explicitly say "Pure transforms for STATE.md text. This module does not read the filesystem and does not own persistence or locking."). Deletion test passes on contact: one side can be deleted as soon as the other becomes the generated artifact. This is the safest possible first step and the canonical proof that the generator pattern works for executable logic, not just alias tables.
 
 **Scope:**
-- Promote `sdk/src/query/state-document.ts` to a source under `sdk/src/state-document/index.ts` (or keep in place — decided in implementation).
-- Write `sdk/scripts/gen-state-document.ts` that emits `get-shit-done/bin/lib/state-document.generated.cjs` (and optionally re-exports the TS form at its existing location).
+- Promote `sdk/src/query/state-document.ts` to `sdk/src/state/index.ts` (implemented).
+- Write `sdk/scripts/gen-state-document.ts` that emits `gsd-core/bin/lib/state-document.generated.cjs` (and optionally re-exports the TS form at its existing location).
 - Write `sdk/scripts/check-state-document-fresh.mjs` modeled on `check-command-aliases-fresh.mjs`.
 - Replace `bin/lib/state-document.cjs` content with a thin re-export from `state-document.generated.cjs`. Keep the existing filename so callers (e.g. `workstream-inventory.cjs:16`) don't need to update imports.
 - Wire `check-state-document-fresh.mjs` into CI alongside `check-command-aliases-fresh.mjs`.
@@ -89,8 +89,8 @@ Phases are sized to ship in one to two PRs each. Each phase has its own GitHub i
 **Scope:**
 - Add a **Configuration Module** entry to `CONTEXT.md` first. Definition: "Module owning config load, legacy-key normalization, defaults merge, and explicit on-disk migration for `.planning/config.json`." Interface and invariants per ADR §6.
 - Extract `CONFIG_DEFAULTS`, `VALID_CONFIG_KEYS`, `DYNAMIC_KEY_PATTERNS`, `RUNTIME_STATE_KEYS` to two data manifests: `sdk/shared/config-schema.manifest.json` and `sdk/shared/config-defaults.manifest.json`. Precedent: `sdk/shared/model-catalog.json`.
-- Write the Configuration Module source at `sdk/src/configuration/index.ts`. Implementation imports the two manifests and exports `loadConfig`, `normalizeLegacyKeys`, `mergeDefaults`, `migrateOnDisk`.
-- Write `sdk/scripts/gen-configuration.ts` to emit `get-shit-done/bin/lib/configuration.generated.cjs` and (if needed) `sdk/src/query/config-schema.generated.ts`.
+- Write the Configuration Module source at `sdk/src/config/index.ts`. Implementation imports the two manifests and exports `loadConfig`, `normalizeLegacyKeys`, `mergeDefaults`, `migrateOnDisk`.
+- Write `sdk/scripts/gen-configuration.ts` to emit `gsd-core/bin/lib/configuration.generated.cjs` and (if needed) `sdk/src/query/config-schema.generated.ts`.
 - Write `sdk/scripts/check-configuration-fresh.mjs`.
 - Replace the inline implementations in `bin/lib/core.cjs:loadConfig` (lines 220–243, 434–449, 485) and `bin/lib/config.cjs` (the validation surface) with thin Adapters over the generated Module. Delete the inline `CONFIG_DEFAULTS`, the false-positive warning at `core.cjs:444-449`, and the duplicated `_deepMergeConfig`.
 - Replace `sdk/src/config.ts:mergeDefaults` (lines 192–218) with a re-export from the new Module.
@@ -112,8 +112,8 @@ Phases are sized to ship in one to two PRs each. Each phase has its own GitHub i
 **Why third.** Phase 1 proves the pattern for pure transforms. Phase 2 proves it for data-manifest-backed logic. Phase 3 generalizes across the remaining hand-synced pairs surfaced by the audit. The Workstream Inventory Module is the headline because it requires the **Builder/Reader split** — the projection logic is pure and shareable, but the directory traversal is legitimately sync (CJS) vs async (SDK). This is the pattern for every paired Module with mixed pure-and-I/O concerns.
 
 **Scope:**
-- Write the Workstream Inventory Builder source at `sdk/src/workstream-inventory/builder.ts`. Pure function: takes a list of directory entries plus per-workstream STATE.md text plus plan-scan results and returns the typed `WorkstreamPhaseInventory`/`WorkstreamInventory` projection. No fs reads.
-- Write `sdk/scripts/gen-workstream-inventory-builder.ts` to emit `get-shit-done/bin/lib/workstream-inventory-builder.generated.cjs` and `sdk/src/query/workstream-inventory-builder.generated.ts`.
+- Write the Workstream Inventory Builder source at `sdk/src/workstream/builder.ts`. Pure function: takes a list of directory entries plus per-workstream STATE.md text plus plan-scan results and returns the typed `WorkstreamPhaseInventory`/`WorkstreamInventory` projection. No fs reads.
+- Write `sdk/scripts/gen-workstream-inventory-builder.ts` to emit `gsd-core/bin/lib/workstream-inventory-builder.generated.cjs` and `sdk/src/query/workstream-inventory-builder.generated.ts`.
 - Write `sdk/scripts/check-workstream-inventory-builder-fresh.mjs`.
 - Refactor `bin/lib/workstream-inventory.cjs` to a sync Reader Adapter: does `fs.readdirSync` + `readFileSync` of STATE.md, calls the Builder. The projection logic is removed.
 - Refactor `sdk/src/query/workstream-inventory.ts` to an async Reader Adapter: same shape, async I/O, calls the Builder.
@@ -177,7 +177,7 @@ Phases are sized to ship in one to two PRs each. Each phase has its own GitHub i
 ### Phase 6 — Enforcement hardening + retrospective
 
 **Scope:**
-- Write `scripts/lint-shared-module-handsync.cjs`. Greps for any pair of files at `get-shit-done/bin/lib/<name>.cjs` and `sdk/src/query/<name>.ts` (or `sdk/src/<name>.ts`) where neither file matches `*.generated.*` and the pair is not on an explicit allow-list. Allow-list documents the cooperating-sibling exceptions (e.g. routing files where the implementations are structurally different).
+- Write `scripts/lint-shared-module-handsync.cjs`. Greps for any pair of files at `gsd-core/bin/lib/<name>.cjs` and `sdk/src/query/<name>.ts` (or `sdk/src/<name>.ts`) where neither file matches `*.generated.*` and the pair is not on an explicit allow-list. Allow-list documents the cooperating-sibling exceptions (e.g. routing files where the implementations are structurally different).
 - Verify each Shared Module from Phases 1–4 has its own freshness check wired to CI.
 - Verify Phase 5's golden parity matrix covers every canonical command family.
 - Add CODEOWNERS rules for `sdk/src/<module>/**` for each Shared Module source-of-truth directory, for `sdk/shared/*.manifest.json`, and for `sdk/src/query-runtime-bridge.ts` (the Phase 5 boundary). Architecture-team review required.
@@ -209,7 +209,7 @@ Phase 5 specifically preserves the in-process model: `QueryRuntimeBridge.execute
 ### Build/install pipeline impact
 
 - Each generator runs at build time on the developer machine (and in CI for the freshness check). No runtime generator execution.
-- The published `get-shit-done-cc` package already includes both `get-shit-done/bin/` and `sdk/dist/`. The generated `.cjs` files are committed to the repo (like `command-aliases.generated.cjs` today), so the install flow is unchanged — no on-install code generation.
+- The published `@opengsd/gsd-core` package already includes both `gsd-core/bin/` and `sdk/dist/`. The generated `.cjs` files are committed to the repo (like `command-aliases.generated.cjs` today), so the install flow is unchanged — no on-install code generation.
 - `npm run build:sdk` continues to do what it does. Generators are invoked via `npm run gen:<module>` per the existing precedent.
 
 ### Risks
@@ -228,7 +228,7 @@ Phase 5 specifically preserves the in-process model: `QueryRuntimeBridge.execute
 
 ### Open questions (resolved before the phase that depends on them)
 
-1. **Phase 1 source location** — `sdk/src/state-document/index.ts` (move) vs `sdk/src/query/state-document.ts` (in place). Decided when Phase 1 PR is drafted.
+1. **Phase 1 source location** — resolved to `sdk/src/state/index.ts` (migrated from `sdk/src/query/state-document.ts`).
 2. **Phase 2 manifest format** — JSON vs JSONC vs TypeScript-as-source. Decided in Phase 2. JSON wins unless we need comments for invariants documentation.
 3. **Phase 3 sibling-Module audit** — exact list of pairs that get Builder-split vs deferred. Decided as a deliverable of Phase 3's spike.
 4. **Phase 5 synchronous-bridging mechanism** — `executeForCjs` implementation strategy: `deasync` native module (battle-tested but C++ binding), `Atomics.wait` on a worker channel (zero-binding but spins a Worker), or refactor every async SDK handler to expose a sync entry point (cleanest but largest scope). Decided in the Phase 5 spike issue before any family migration begins.

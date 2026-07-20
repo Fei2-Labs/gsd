@@ -10,7 +10,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 
 ### Agent Categories
 
-> The table below covers the **21 primary agents** detailed in this section. Twelve additional shipped agents (pattern-mapper, debug-session-manager, code-reviewer, code-fixer, ai-researcher, domain-researcher, eval-planner, eval-auditor, framework-selector, intel-updater, doc-classifier, doc-synthesizer) have concise stubs in the [Advanced and Specialized Agents](#advanced-and-specialized-agents) section below. For the authoritative 33-agent roster, see [`docs/INVENTORY.md`](INVENTORY.md) and the `agents/` directory.
+> The table below covers the **21 primary agents** detailed in this section. Thirteen additional shipped agents (pattern-mapper, debug-session-manager, code-reviewer, code-fixer, ai-researcher, domain-researcher, eval-planner, eval-auditor, framework-selector, intel-updater, doc-classifier, doc-synthesizer, mempalace-curator) have concise stubs in the [Advanced and Specialized Agents](#advanced-and-specialized-agents) section below. For the authoritative 34-agent roster, see [`docs/INVENTORY.md`](INVENTORY.md) and the `agents/` directory.
 
 | Category | Count | Agents |
 |----------|-------|--------|
@@ -42,6 +42,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 | **Parallelism** | 4 instances (stack, features, architecture, pitfalls) |
 | **Tools** | Read, Write, Bash, Grep, Glob, WebSearch, WebFetch, mcp (context7) |
 | **Model (balanced)** | Sonnet |
+| **Color** | Cyan |
 | **Produces** | `.planning/research/STACK.md`, `FEATURES.md`, `ARCHITECTURE.md`, `PITFALLS.md` |
 
 **Capabilities:**
@@ -61,6 +62,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 | **Parallelism** | 4 instances (same focus areas as project researcher) |
 | **Tools** | Read, Write, Bash, Grep, Glob, WebSearch, WebFetch, mcp (context7) |
 | **Model (balanced)** | Sonnet |
+| **Color** | Cyan |
 | **Produces** | `{phase}-RESEARCH.md` |
 
 **Capabilities:**
@@ -80,7 +82,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 | **Parallelism** | Single instance |
 | **Tools** | Read, Write, Bash, Grep, Glob, WebSearch, WebFetch, mcp (context7) |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#E879F9` (fuchsia) |
+| **Color** | Purple |
 | **Produces** | `{phase}-UI-SPEC.md` |
 
 **Capabilities:**
@@ -159,7 +161,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 |----------|-------|
 | **Spawned by** | `/gsd-plan-phase`, `/gsd-quick` |
 | **Parallelism** | Single instance |
-| **Tools** | Read, Write, Bash, Glob, Grep, WebFetch, mcp (context7) |
+| **Tools** | Read, Write, Edit, Bash, Glob, Grep, WebFetch, mcp (context7) |
 | **Model (balanced)** | Opus |
 | **Color** | Green |
 | **Produces** | `{phase}-{N}-PLAN.md` files |
@@ -171,6 +173,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 - Includes `read_first` and `acceptance_criteria` sections
 - Groups plans into dependency waves
 - Performs reachability check to validate plan steps reference accessible files and APIs (v1.32)
+- Enforces a comment-text discipline HARD GATE at plan-write time (`verify.plan-structure`): a literal that an acceptance criterion negative-greps for (`grep -c 'LIT' file == 0`) must not appear verbatim in an `<action>` body; violations fail plan creation. Use `<!-- planner-discipline-allow: LIT -->` to allowlist a legitimate occurrence. (#429)
 
 ---
 
@@ -227,6 +230,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 | **Spawned by** | `/gsd-plan-phase` (verification loop, max 3 iterations) |
 | **Parallelism** | Single instance (iterative) |
 | **Tools** | Read, Bash, Glob, Grep |
+| **Disallowed Tools** | Write, Edit, MultiEdit |
 | **Model (balanced)** | Sonnet |
 | **Color** | Green |
 | **Produces** | PASS/FAIL verdict with specific feedback |
@@ -252,6 +256,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 | **Spawned by** | `/gsd-audit-milestone` |
 | **Parallelism** | Single instance |
 | **Tools** | Read, Bash, Grep, Glob |
+| **Disallowed Tools** | Write, Edit, MultiEdit |
 | **Model (balanced)** | Sonnet |
 | **Color** | Blue |
 | **Produces** | Integration verification report |
@@ -267,9 +272,13 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 | **Spawned by** | `/gsd-ui-phase` (validation loop, max 2 iterations) |
 | **Parallelism** | Single instance |
 | **Tools** | Read, Bash, Glob, Grep |
+| **Disallowed Tools** | Write, Edit, MultiEdit |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#22D3EE` (cyan) |
+| **Color** | Cyan |
 | **Produces** | BLOCK/FLAG/PASS verdict |
+
+**Key behaviors:**
+- **Adversarial stance / "The Auditor" (#1578):** applies explicit BLOCK/FLAG/PASS tiers and an anti-capitulation rule that resists author-framing pressure while still allowing self-correction when the prior dimension application was mistaken. Persona effects are strongest on Sonnet-class reasoning and unvalidated on budget/Haiku-class routing; the criteria and evidence remain authoritative.
 
 ---
 
@@ -282,6 +291,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 | **Spawned by** | `/gsd-execute-phase` (after all executors complete) |
 | **Parallelism** | Single instance |
 | **Tools** | Read, Write, Bash, Grep, Glob |
+| **Disallowed Tools** | Edit, MultiEdit |
 | **Model (balanced)** | Sonnet |
 | **Color** | Green |
 | **Produces** | `{phase}-VERIFICATION.md` |
@@ -292,6 +302,8 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 - Logs issues for `/gsd-verify-work` to address
 - Milestone scope filtering: gaps addressed in later phases are marked as "deferred", not reported as failures (v1.32)
 - **Test quality audit** (v1.32): verifies that tests prove what they claim by checking for disabled/skipped tests on requirements, circular test patterns (system generating its own expected values), assertion strength (existence vs. value vs. behavioral), and expected value provenance. Blockers from test quality audit override an otherwise passing verification
+- Runs the full workspace test suite at most once per verification — proves a test *exists* by enumeration and that it *passes* via a single named test, never re-running the whole suite per must-have.
+- **Behavior-dependent calibration (#966):** a must-have that asserts a state transition or a cancellation/cleanup/ordering invariant is marked `⚠️ PRESENT_BEHAVIOR_UNVERIFIED` (not `VERIFIED`) when no test exercises it — excluded from the `verified_truths` score, counted in the `behavior_unverified` frontmatter field, and routed to human verification, so a clean `N/N` certifies behavioral evidence rather than mere symbol presence.
 
 ---
 
@@ -305,6 +317,7 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 | **Parallelism** | Single instance |
 | **Tools** | Read, Write, Edit, Bash, Grep, Glob |
 | **Model (balanced)** | Sonnet |
+| **Color** | Purple |
 | **Produces** | Test files, updated `VALIDATION.md` |
 
 **Key behaviors:**
@@ -323,8 +336,9 @@ GSD uses a multi-agent architecture where thin orchestrators (workflow files) sp
 | **Spawned by** | `/gsd-ui-review` |
 | **Parallelism** | Single instance |
 | **Tools** | Read, Write, Bash, Grep, Glob |
+| **Disallowed Tools** | Edit, MultiEdit |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#F472B6` (pink) |
+| **Color** | Pink |
 | **Produces** | `{phase}-UI-REVIEW.md` with scores |
 
 **6 Audit Pillars (scored 1-4):**
@@ -400,7 +414,7 @@ runs its default whole-repo scan.
 | **Parallelism** | Single instance |
 | **Tools** | Read |
 | **Model (balanced)** | Sonnet |
-| **Color** | Magenta |
+| **Color** | Purple |
 | **Produces** | `USER-PROFILE.md`, `CLAUDE.md` profile section |
 
 **Behavioral Dimensions:**
@@ -444,6 +458,7 @@ Communication style, decision patterns, debugging approach, UX preferences, vend
 | **Spawned by** | `/gsd-docs-update` (after doc-writer completes) |
 | **Parallelism** | Multiple instances (one per doc file) |
 | **Tools** | Read, Write, Bash, Grep, Glob |
+| **Disallowed Tools** | Edit, MultiEdit |
 | **Model (balanced)** | Sonnet |
 | **Color** | Orange |
 | **Produces** | Structured JSON verification results per doc |
@@ -464,10 +479,10 @@ Communication style, decision patterns, debugging approach, UX preferences, vend
 |----------|-------|
 | **Spawned by** | `/gsd-secure-phase` |
 | **Parallelism** | Single instance |
-| **Tools** | Read, Write, Edit, Bash, Glob, Grep |
+| **Tools** | Read, Bash, Glob, Grep |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#EF4444` (red) |
-| **Produces** | `{phase}-SECURITY.md` |
+| **Color** | Red |
+| **Produces** | Structured verdict (SECURED / OPEN_THREATS / ESCALATE) — orchestrator writes `{phase}-SECURITY.md` (#2119) |
 
 **Key behaviors:**
 - Verifies each threat by its declared disposition (mitigate / accept / transfer)
@@ -492,7 +507,7 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 | **Parallelism** | Single instance |
 | **Tools** | Read, Bash, Glob, Grep, Write |
 | **Model (balanced)** | Sonnet |
-| **Color** | Magenta |
+| **Color** | Purple |
 | **Produces** | `PATTERNS.md` in the phase directory |
 
 **Key behaviors:**
@@ -532,7 +547,7 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 | **Parallelism** | Typically single instance per review scope |
 | **Tools** | Read, Write, Bash, Grep, Glob |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#F59E0B` (amber) |
+| **Color** | Orange |
 | **Produces** | `REVIEW.md` in the phase directory |
 
 **Key behaviors:**
@@ -552,7 +567,7 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 | **Parallelism** | Single instance |
 | **Tools** | Read, Edit, Write, Bash, Grep, Glob |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#10B981` (emerald) |
+| **Color** | Green |
 | **Produces** | `REVIEW-FIX.md`; one atomic git commit per applied fix |
 
 **Key behaviors:**
@@ -572,7 +587,7 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 | **Parallelism** | Single instance (sequential with domain-researcher / eval-planner) |
 | **Tools** | Read, Write, Bash, Grep, Glob, WebFetch, WebSearch, mcp (context7) |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#34D399` (green) |
+| **Color** | Green |
 | **Produces** | Sections 3–4b of `AI-SPEC.md` (framework quick reference + implementation guidance) |
 
 **Key behaviors:**
@@ -591,7 +606,7 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 | **Parallelism** | Single instance |
 | **Tools** | Read, Write, Bash, Grep, Glob, WebSearch, WebFetch, mcp (context7) |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#A78BFA` (violet) |
+| **Color** | Purple |
 | **Produces** | Section 1b of `AI-SPEC.md` |
 
 **Key behaviors:**
@@ -610,10 +625,10 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 | **Parallelism** | Single instance (sequential after domain-researcher) |
 | **Tools** | Read, Write, Bash, Grep, Glob, AskUserQuestion |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#F59E0B` (amber) |
+| **Color** | Orange |
 | **Produces** | Sections 5–7 of `AI-SPEC.md` (Evaluation Strategy, Guardrails, Production Monitoring) |
 
-**Required reading:** `get-shit-done/references/ai-evals.md` (evaluation framework).
+**Required reading:** `gsd-core/references/ai-evals.md` (evaluation framework).
 
 **Key behaviors:**
 - Turns domain-researcher rubric ingredients into measurable, tooled evaluation criteria
@@ -630,11 +645,12 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 | **Spawned by** | `/gsd-eval-review` |
 | **Parallelism** | Single instance |
 | **Tools** | Read, Write, Bash, Grep, Glob |
+| **Disallowed Tools** | Edit, MultiEdit |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#EF4444` (red) |
+| **Color** | Red |
 | **Produces** | `EVAL-REVIEW.md` with dimension scores, findings, and remediation guidance |
 
-**Required reading:** `get-shit-done/references/ai-evals.md`.
+**Required reading:** `gsd-core/references/ai-evals.md`.
 
 **Key behaviors:**
 - Compares the implemented codebase against the planned eval strategy — never re-plans
@@ -652,10 +668,10 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 | **Parallelism** | Single instance (interactive) |
 | **Tools** | Read, Bash, Grep, Glob, WebSearch, AskUserQuestion |
 | **Model (balanced)** | Sonnet |
-| **Color** | `#38BDF8` (sky blue) |
+| **Color** | Cyan |
 | **Produces** | Scored ranked recommendation (structured return to orchestrator) |
 
-**Required reading:** `get-shit-done/references/ai-frameworks.md` (decision matrix).
+**Required reading:** `gsd-core/references/ai-frameworks.md` (decision matrix).
 
 **Key behaviors:**
 - Scans `package.json`, `pyproject.toml`, `requirements*.txt` for existing AI libraries before the interview to avoid recommending a rejected framework
@@ -674,11 +690,11 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 | **Tools** | Read, Write, Bash, Glob, Grep |
 | **Model (balanced)** | Sonnet |
 | **Color** | Cyan |
-| **Produces** | `.planning/intel/*.json` (and companion Markdown) consumed by `gsd-sdk query intel` |
+| **Produces** | `.planning/intel/*.json` (and companion Markdown) consumed by `gsd-tools query intel` |
 
 **Key behaviors:**
 - Writes current state only — no temporal language, every claim references an actual file path
-- Uses Glob / Read / Grep for cross-platform correctness; Bash is reserved for `gsd-sdk query intel` CLI calls
+- Uses Glob / Read / Grep for cross-platform correctness; Bash is reserved for `gsd-tools query intel` CLI calls
 
 ---
 
@@ -698,6 +714,7 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 **Key behaviors:**
 - Single-doc scope — never synthesizes or resolves conflicts (that is the synthesizer's job)
 - Heuristic-first classification; returns UNKNOWN when the doc lacks type signals rather than guessing
+- **Extraction discipline (#1578):** few-shot input→output exemplars plus a terminal schema restatement; marks a field absent rather than fabricating a value when the doc lacks the signal.
 
 ---
 
@@ -717,12 +734,34 @@ Twelve additional agents ship under `agents/gsd-*.md` and are used by specialty 
 **Key behaviors:**
 - Hard-blocks on LOCKED-vs-LOCKED ADR contradictions instead of silently picking a winner
 - Follows the `references/doc-conflict-engine.md` contract so `/gsd-import` and `/gsd-ingest-docs` produce consistent conflict reports
+- **Extraction discipline (#1578):** few-shot exemplars plus a terminal schema restatement and a mark-absent (no-fabrication) rule for missing fields.
+
+---
+
+### gsd-mempalace-curator
+
+**Role:** Ship-time memory curation — writes per-agent diary entries, proposes and creates cross-project tunnels, runs wing-scoped sync pruning, and mirrors `extract-learnings` output into MemPalace's temporal knowledge graph with provenance.
+
+| Property | Value |
+|----------|-------|
+| **Spawned by** | MemPalace capability at `ship:post` (when `mempalace.enabled = true`); diary/tunnels/KG-mirror are then refined by their own toggles |
+| **Parallelism** | Single instance |
+| **Tools** | Read, Bash, Grep, Glob |
+| **Model (balanced)** | Sonnet |
+| **Produces** | Diary entry in MemPalace, wing tunnel proposals, KG provenance records |
+
+**Key behaviors:**
+- Best-effort only — every operation is `onError: skip`; a MemPalace failure never halts the loop
+- Wing-scoped sync pruning (`mempalace sync --wing <wing> --apply`) — never runs a global prune
+- Cross-project tunnel proposals when `mempalace.cross_project_tunnels = true`
+- Mirrors `extract-learnings` decisions, lessons, patterns, and surprises into the KG with `source_drawer_id` provenance
+- Requires MemPalace MCP server or CLI to be reachable; writes a skip-notice stub when unavailable
 
 ---
 
 ## Agent Tool Permissions Summary
 
-> **Scope:** this table covers the 21 primary agents only. The 12 advanced/specialized agents listed above carry their own tool surfaces in their `agents/gsd-*.md` frontmatter (summarized in the per-agent stubs above and in [`docs/INVENTORY.md`](INVENTORY.md)).
+> **Scope:** this table covers the 21 primary agents only. The 13 advanced/specialized agents listed above carry their own tool surfaces in their `agents/gsd-*.md` frontmatter (summarized in the per-agent stubs above and in [`docs/INVENTORY.md`](INVENTORY.md)).
 
 | Agent | Read | Write | Edit | Bash | Grep | Glob | WebSearch | WebFetch | MCP |
 |-------|------|-------|------|------|------|------|-----------|----------|-----|

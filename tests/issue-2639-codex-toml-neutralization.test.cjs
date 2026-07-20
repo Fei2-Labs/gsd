@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * Regression: issue #2639 — Codex install generated agent TOMLs with stale
@@ -24,6 +24,7 @@ const path = require('path');
 const os = require('os');
 
 const { installCodexConfig } = require('../bin/install.js');
+const { cleanup } = require('./helpers.cjs');
 
 function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-2639-'));
@@ -54,7 +55,7 @@ describe('#2639 — Codex TOML emit routes through full neutralization pipeline'
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup(tmpDir);
   });
 
   test('strips CLAUDE.md, .claude/skills/, .claude/commands/, .claude/agents/, and .claudeignore from emitted TOML', () => {

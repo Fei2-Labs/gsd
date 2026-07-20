@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * Tests for code_review_command hook in ship workflow (#1876)
@@ -10,15 +10,15 @@
  * wired into config, templates, and the ship workflow.
  */
 
-const { describe, test, beforeEach, afterEach } = require('node:test');
+const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { createTempProject, cleanup, runGsdTools } = require('./helpers.cjs');
 
-const CONFIG_CJS_PATH = path.join(__dirname, '..', 'get-shit-done', 'bin', 'lib', 'config.cjs');
-const SHIP_MD_PATH = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'ship.md');
-const CONFIG_TEMPLATE_PATH = path.join(__dirname, '..', 'get-shit-done', 'templates', 'config.json');
+const CONFIG_CJS_PATH = path.join(__dirname, '..', 'gsd-core', 'bin', 'lib', 'config.cjs');
+const SHIP_MD_PATH = path.join(__dirname, '..', 'gsd-core', 'workflows', 'ship.md');
+const CONFIG_TEMPLATE_PATH = path.join(__dirname, '..', 'gsd-core', 'templates', 'config.json');
 
 describe('code_review_command config key', () => {
   test('workflow.code_review_command is in VALID_CONFIG_KEYS', () => {

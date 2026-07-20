@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * GSD Tools Tests - discuss-phase power user mode
@@ -19,8 +19,8 @@ const path = require('path');
 
 describe('discuss-phase power user mode (#1513)', () => {
   const commandPath = path.join(__dirname, '..', 'commands', 'gsd', 'discuss-phase.md');
-  const workflowPath = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'discuss-phase.md');
-  const powerWorkflowPath = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'discuss-phase-power.md');
+  const workflowPath = path.join(__dirname, '..', 'gsd-core', 'workflows', 'discuss-phase.md');
+  const powerWorkflowPath = path.join(__dirname, '..', 'gsd-core', 'workflows', 'discuss-phase-power.md');
 
   describe('command file (discuss-phase.md)', () => {
     test('mentions --power flag in argument-hint or description', () => {
@@ -42,17 +42,17 @@ describe('discuss-phase power user mode (#1513)', () => {
 
   describe('main workflow file (discuss-phase.md)', () => {
     test('has power_user_mode section or references discuss-phase-power.md', () => {
-      // After #2551, the power dispatch lives in discuss-phase/modes/power.md and
+      // After the discuss-phase/modes split (#717), the power dispatch lives in discuss-phase/modes/power.md and
       // the parent references it via the dispatch table.
       const parentContent = fs.readFileSync(workflowPath, 'utf8');
-      const powerModePath = path.join(__dirname, '..', 'get-shit-done', 'workflows', 'discuss-phase', 'modes', 'power.md');
+      const powerModePath = path.join(__dirname, '..', 'gsd-core', 'workflows', 'discuss-phase', 'modes', 'power.md');
       const powerMode = fs.existsSync(powerModePath) ? fs.readFileSync(powerModePath, 'utf8') : '';
       const content = parentContent + '\n' + powerMode;
       const hasPowerSection = content.includes('power_user_mode') || content.includes('power user mode') || content.includes('modes/power.md');
       const hasReference = content.includes('discuss-phase-power');
       assert.ok(
         hasPowerSection || hasReference,
-        'discuss-phase.md (or modes/power.md after #2551) should have power_user_mode section or reference discuss-phase-power.md'
+        'discuss-phase.md (or modes/power.md after the discuss-phase/modes split) should have power_user_mode section or reference discuss-phase-power.md'
       );
     });
 
@@ -69,7 +69,7 @@ describe('discuss-phase power user mode (#1513)', () => {
     test('file exists', () => {
       assert.ok(
         fs.existsSync(powerWorkflowPath),
-        'get-shit-done/workflows/discuss-phase-power.md should exist'
+        'gsd-core/workflows/discuss-phase-power.md should exist'
       );
     });
 

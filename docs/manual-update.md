@@ -1,11 +1,11 @@
 # Manual Update (Non-npm Install)
 
-Use this procedure when `npx get-shit-done-cc@latest` is unavailable — e.g. during a publish outage or if you are working directly from the source repo.
+Use this procedure when `npx @opengsd/gsd-core@latest` is unavailable — e.g. during a publish outage or if you are working directly from the source repo.
 
 ## Prerequisites
 
 - Node.js installed
-- This repo cloned locally (`git clone https://github.com/gsd-build/get-shit-done`)
+- This repo cloned locally (`git clone https://github.com/open-gsd/gsd-core`)
 
 ## Steps
 
@@ -32,7 +32,6 @@ Replace `--claude` with the flag for your runtime:
 | Runtime | Flag |
 |---|---|
 | Claude Code | `--claude` |
-| Gemini CLI | `--gemini` |
 | OpenCode | `--opencode` |
 | Kilo | `--kilo` |
 | Codex | `--codex` |
@@ -48,7 +47,7 @@ Use `--local` instead of `--global` for a project-scoped install.
 
 The installer performs a clean wipe-and-replace of GSD-managed directories only:
 
-- `~/.claude/get-shit-done/` — workflows, references, templates
+- `~/.claude/gsd-core/` — workflows, references, templates
 - `~/.claude/commands/gsd/` — slash commands
 - `~/.claude/agents/gsd-*.md` — GSD agents
 - `~/.claude/hooks/dist/` — compiled hooks
